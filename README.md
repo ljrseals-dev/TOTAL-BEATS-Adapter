@@ -8,19 +8,19 @@ Converts compositional intelligence (musical events + context) into expressive, 
 
 ## Current status (2026-11-19)
 
-| Phase | Component                        | State              |
-|-------|----------------------------------|--------------------|
-| 0     | Contract integrity               | **Complete**       |
-| 1     | Production-grade adapter         | **Repair in progress** |
-| 2     | Neural controller + training     | Not started        |
-| 3     | Guard + timing system            | **Core repairs in progress** |
-| 4     | Polyphonic Sogitech integration  | Design only        |
-| 5     | Offline audio rendering          | Not started        |
-| 6     | Learned audio embedding          | Stub only          |
-| 7     | Mixing and mastering             | Not started        |
-| 8     | Complete album production        | Spec only          |
+| Phase | Component | State |
+|---|---|---|
+| 0 | Contract integrity | **Complete** |
+| 1 | Production-grade adapter | **Repair in progress** |
+| 2 | v1-64 controller + trainer | **Implemented; dataset and weights absent** |
+| 3 | Guard + timing system | **Core repairs implemented; further integration pending** |
+| 4 | Polyphonic Sogitech integration | Design only |
+| 5 | Offline audio rendering | Not started |
+| 6 | Learned audio embedding | Stub only |
+| 7 | Mixing and mastering | Not started |
+| 8 | Complete album production | Spec only |
 
-**Feature contract:** `brightness_hist_7` is index 43; `audio_emb_0` is index 44.
+**Feature contract:** `brightness_hist_7` is index 43; `audio_emb_0` is index 44. The audio block currently contains only simple reference-audio statistics and zeros, not a learned embedding. Normalization statistics remain identity placeholders until a versioned corpus is fitted.
 
 **Parameter source pin:** `ranges.json` is checked against Sogitech commit `1a40ed625743d16e41341a0a3c08d0a2b6f45ff5`, not a moving branch name.
 
@@ -44,7 +44,7 @@ pytest tests/ -v
 python scripts/smoke_adapter.py
 ```
 
-Production use must pass a trained controller to `SogitechAdapter`. The smoke script opts into fixed demo defaults explicitly; missing trained weights are never silently treated as a trained model.
+Production use must pass a compatible trained controller to `SogitechAdapter`. The loader rejects legacy checkpoints trained on a different 64-value feature layout. To train a compatible controller, install `.[train]` and supply a reviewed paired v1-64 dataset using `training/DATASET_FORMAT.md`. No dataset or trained weights are currently included.
 
 ---
 
@@ -55,30 +55,32 @@ TOTAL-BEATS-Adapter/
 ├── ranges.json
 ├── sogitech_adapter/
 │   ├── adapter.py
+│   ├── controller.py
 │   ├── features.py
 │   ├── ranges.py
 │   ├── events.py
 │   ├── guards.py
 │   ├── timing.py
 │   └── validation.py
+├── training/
+│   ├── dataset.py
+│   ├── train_controller.py
+│   └── DATASET_FORMAT.md
 ├── docs/
 ├── tests/
-│   ├── test_contract_v1_64.py
-│   └── test_adapter_safety.py
 ├── scripts/smoke_adapter.py
 └── .github/workflows/tests.yml
 ```
-
----
 
 ## Core design rules
 
 1. **Composition never emits synthesis parameters.** TOTAL BEATS emits `MusicalEvent` objects and context.
 2. **Synthesis never decides musical structure.** Sogitech only consumes 18-field frames.
 3. **Contracts are versioned.** The 64-dim feature vector and 18-field parameter frame are frozen interfaces.
-4. **Fail loudly.** Unverified or malformed ranges and missing production controller weights raise hard errors.
+4. **Fail loudly.** Unverified ranges, malformed frames, and missing production controller weights raise hard errors.
 5. **Demo mode is explicit.** Fixed safe defaults are available only when `allow_safe_defaults=True`; they are not neural predictions.
-6. **Do not invent trained weights.** The adapter does not initialise or substitute a random controller.
+6. **No incompatible checkpoints.** Controller weights must declare the exact feature, parameter, controller, and range-source contracts.
+7. **No fabricated training data.** The trainer accepts only paired feature/parameter datasets with provenance and guard validation.
 
 ---
 
