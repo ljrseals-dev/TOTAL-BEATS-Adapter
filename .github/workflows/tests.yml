@@ -21,15 +21,44 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install dependencies
+      - name: Install base and test dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install numpy pytest
-          pip install -e .
+          pip install -e ".[dev]"
 
       - name: Verify ranges contract
         run: |
           python -c "from sogitech_adapter.ranges import ParamRanges; r = ParamRanges('ranges.json'); print('OK', r.contract, len(r.fields))"
 
-      - name: Run contract and unit tests
+      - name: Run contract, unit, and import-policy tests
         run: pytest tests/ -v --tb=short
+
+  neural-extra:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install controller inference and training extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[neural,train]"
+
+      - name: Verify real PyTorch controller capability
+        run: |
+          python - <<'PY'
+          import torch
+          from sogitech_adapter.controller import build_network
+
+          model = build_network()
+          features = torch.zeros((2, 64), dtype=torch.float32)
+          continuous, osc1_logits, osc2_logits = model(features)
+          assert tuple(continuous.shape) == (2, 12)
+          assert tuple(osc1_logits.shape) == (2, 4)
+          assert tuple(osc2_logits.shape) == (2, 4)
+          print("PyTorch controller capability verified:", torch.__version__)
+          PY
