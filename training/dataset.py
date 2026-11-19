@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 import numpy as np
 
-from sogitech_adapter.controller import CONTINUOUS_NAMES, ENUM_NAMES, FEATURE_CONTRACT, PARAMETER_CONTRACT
+from sogitech_adapter.controller import ENUM_NAMES, FEATURE_CONTRACT, PARAMETER_CONTRACT
 from sogitech_adapter.ranges import ParamRanges, REQUIRED_18
 
 
@@ -75,5 +75,22 @@ def load_training_dataset(path: str | Path, ranges: ParamRanges):
             raise DatasetError(f"{name} targets fall outside the verified physical range")
         if name in ENUM_NAMES and np.any(values != np.floor(values)):
             raise DatasetError(f"{name} targets must be integer enum indices")
+
+    guards = ranges.guards
+    if np.any(parameters[:, indices["powerSagDepth"]] > guards["power_sag_musical_ceiling"]):
+        raise DatasetError("powerSagDepth targets exceed the musical guard ceiling")
+    if np.any(parameters[:, indices["residualGain"]] > guards["residual_musical_ceiling"]):
+        raise DatasetError("residualGain targets exceed the musical guard ceiling")
+    hp_limit = guards["hp_lt_lp_ratio"] * parameters[:, indices["filterLP"]]
+    if np.any(parameters[:, indices["filterHP"]] > hp_limit):
+        raise DatasetError("filterHP targets violate the filterHP/filterLP guard")
+    resonance_guard = guards["res_soft_couple_additive"]
+    coupled = parameters[:, indices["additiveBlend"]] > resonance_guard["trigger_above"]
+    if np.any(parameters[coupled, indices["filterRes"]] > resonance_guard["res_ceiling"]):
+        raise DatasetError("filterRes targets violate additive/resonance coupling")
+    levels = sum(parameters[:, indices[name]] for name in
+                 ("osc1Level", "osc2Level", "subLevel", "noiseLevel"))
+    if np.any(levels < guards["min_total_level"]):
+        raise DatasetError("parameter targets violate the minimum oscillator level guard")
 
     return features, parameters, provenance
