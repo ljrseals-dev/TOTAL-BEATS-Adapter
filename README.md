@@ -26,13 +26,15 @@ Converts compositional intelligence (musical events + context) into expressive, 
 
 ---
 
-## Quick start
+## Installation and quick start
+
+Base adapter and test dependencies:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install numpy pytest
-pip install -e .
+python -m pip install --upgrade pip
+pip install -e ".[dev]"
 
 # Verify contracts
 python -c "from sogitech_adapter import ParamRanges; r = ParamRanges('ranges.json'); print(r.contract, len(r.fields))"
@@ -44,7 +46,14 @@ pytest tests/ -v
 python scripts/smoke_adapter.py
 ```
 
-Production use must pass a compatible trained controller to `SogitechAdapter`. The loader rejects legacy checkpoints trained on a different 64-value feature layout. To train a compatible controller, install `.[train]` and supply a reviewed paired v1-64 dataset using `training/DATASET_FORMAT.md`. No dataset or trained weights are currently included.
+PyTorch is deliberately optional and is never silently substituted:
+
+- Controller inference: `pip install -e ".[neural]"`
+- Controller training: `pip install -e ".[train]"`
+
+Production use must pass a compatible trained controller to `SogitechAdapter`. The loader rejects legacy checkpoints trained on a different 64-value feature layout. Training requires a reviewed paired v1-64 dataset documented in `training/DATASET_FORMAT.md`. No dataset or trained weights are currently included.
+
+Missing PyTorch raises an actionable error at the point where inference or training is requested. See [the import policy](docs/IMPORT_POLICY.md) for the required/optional dependency rules and tests.
 
 ---
 
@@ -81,6 +90,7 @@ TOTAL-BEATS-Adapter/
 5. **Demo mode is explicit.** Fixed safe defaults are available only when `allow_safe_defaults=True`; they are not neural predictions.
 6. **No incompatible checkpoints.** Controller weights must declare the exact feature, parameter, controller, and range-source contracts.
 7. **No fabricated training data.** The trainer accepts only paired feature/parameter datasets with provenance and guard validation, and holds out complete source groups.
+8. **No fake imports.** Required imports fail; optional capabilities fail explicitly when requested but unavailable. See [docs/IMPORT_POLICY.md](docs/IMPORT_POLICY.md).
 
 ---
 
