@@ -21,10 +21,15 @@ class MusicalEvent:
 
     @staticmethod
     def _finite(value, name: str) -> float:
-        if (not isinstance(value, (int, float)) or isinstance(value, bool)
-                or not math.isfinite(value)):
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
             raise ValueError(f"{name} must be a finite number")
-        return float(value)
+        try:
+            result = float(value)
+        except (OverflowError, TypeError, ValueError) as exc:
+            raise ValueError(f"{name} must be a finite number") from exc
+        if not math.isfinite(result):
+            raise ValueError(f"{name} must be a finite number")
+        return result
 
     def validate(self) -> None:
         if (not isinstance(self.midiNote, int) or isinstance(self.midiNote, bool)
