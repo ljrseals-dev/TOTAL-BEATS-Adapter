@@ -8,11 +8,14 @@ The trainer accepts one NumPy NPZ archive. This is a schema, not a generated dat
 |---|---|---|
 | `features` | float32 `(N, 64)` | Feature vectors built by this repository's v1-64 constructor |
 | `parameters` | float64/float32 `(N, 18)` | Physical target values in canonical order below |
+| `groups` | string `(N,)` | Source recording, composition, or capture-session ID for each row |
 | `feature_contract` | scalar string | `v1-64` |
 | `parameter_contract` | scalar string | `sogitech.params.v1` |
 | `parameter_names` | string array `(18,)` | Exact canonical field order below |
 | `range_source_commit` | scalar string | Exact source commit from `ranges.json` |
 | `provenance` | scalar non-empty string | Dataset origin, license/permission, capture or render process |
+
+At least two distinct source groups are required. The trainer assigns entire groups to either training or validation; it never randomly splits individual rows from the same recording across both partitions.
 
 ## Canonical parameter order
 
@@ -31,21 +34,21 @@ Every row is one aligned observation:
 2. Build the feature vector using the exact v1-64 implementation.
 3. Record the corresponding physical Sogitech parameter frame that produced or is intended to produce the paired observation.
 4. Validate the frame against ranges.json and every musical guard.
-5. Store the feature and target in the same row.
+5. Store the feature, target, and source-group ID in the same row.
 
 The feature row and target row must refer to the same event/time slice. Do not pair arbitrary audio descriptors with unrelated parameter values. Keep train and validation splits separated by source recording, composition, or session to avoid leakage.
 
 ## Validation performed by the loader
 
 - Contract IDs, parameter order, and range-source commit must match exactly.
-- At least two paired rows, with identical row counts.
-- Feature shape must be `(N, 64)`; parameter shape must be `(N, 18)`.
+- At least two paired rows and two distinct source groups, with identical row counts.
+- Feature shape must be `(N, 64)`; parameter shape must be `(N, 18)`; group shape must be `(N,)`.
 - All samples must be finite; feature values must be within [-1, 1].
 - Parameter targets must fit their physical ranges.
 - Waveform targets must be integer enum values.
 - Power-sag, residual, HP/LP, resonance-coupling, and minimum-level guards must hold.
 
-The training command additionally requires at least ten rows so it can create a non-trivial train/validation split.
+The training command additionally requires at least ten rows so it can create a non-trivial group-held-out train/validation split.
 
 ## Example archive creation
 
@@ -60,6 +63,7 @@ np.savez_compressed(
     "paired-v1-64.npz",
     features=features.astype(np.float32),       # shape (N, 64)
     parameters=parameters.astype(np.float64),   # shape (N, 18), physical units
+    groups=source_group_ids.astype(str),        # shape (N,), recording/session IDs
     feature_contract=np.asarray("v1-64"),
     parameter_contract=np.asarray("sogitech.params.v1"),
     parameter_names=np.asarray(REQUIRED_18),
