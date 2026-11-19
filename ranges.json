@@ -1,0 +1,49 @@
+{
+  "_meta": {
+    "contract": "sogitech.params.v1",
+    "source_repo": "ljrseals-dev/Sogitech",
+    "source_commit": "main (verified 2026-11-19)",
+    "verified": true,
+    "notes": "Ranges taken from python/audio/render.py PARAM_DEFAULTS and python/neural/controller.py PARAM_RANGES / PARAM_NAMES. Wave enums are continuous 0–3 in the reference renderer (sine/saw/square/triangle)."
+  },
+
+  "midiNote":      { "min": 0.0,  "max": 127.0, "scale": "lin", "unit": "note",  "owner": "passthrough", "status": "verified" },
+  "velocity":      { "min": 0.0,  "max": 1.0,   "scale": "lin", "unit": "norm",  "owner": "passthrough", "status": "verified" },
+  "pressure":      { "min": 0.0,  "max": 1.0,   "scale": "lin", "unit": "norm",  "owner": "passthrough", "status": "verified", "default": 0.0 },
+
+  "osc1Wave":      { "min": 0.0,  "max": 3.0,   "scale": "enum", "unit": "index", "owner": "controller",  "status": "verified", "enum_states": ["sine", "saw", "square", "triangle"] },
+  "osc2Wave":      { "min": 0.0,  "max": 3.0,   "scale": "enum", "unit": "index", "owner": "controller",  "status": "verified", "enum_states": ["sine", "saw", "square", "triangle"] },
+
+  "osc1Level":     { "min": 0.0,  "max": 1.0,   "scale": "lin", "unit": "norm",  "owner": "controller",  "status": "verified" },
+  "osc2Level":     { "min": 0.0,  "max": 1.0,   "scale": "lin", "unit": "norm",  "owner": "controller",  "status": "verified" },
+  "subLevel":      { "min": 0.0,  "max": 1.0,   "scale": "lin", "unit": "norm",  "owner": "controller",  "status": "verified" },
+  "noiseLevel":    { "min": 0.0,  "max": 1.0,   "scale": "lin", "unit": "norm",  "owner": "controller",  "status": "verified" },
+  "additiveBlend": { "min": 0.0,  "max": 1.0,   "scale": "lin", "unit": "norm",  "owner": "controller",  "status": "verified" },
+
+  "powerSagDepth": { "min": 0.0,  "max": 1.0,   "scale": "lin", "unit": "norm",  "owner": "controller",  "status": "verified",
+                     "musical_ceiling": 0.6,
+                     "notes": "Repo allows 0–1; 0.6 is a recommended musical ceiling for the guard layer." },
+
+  "filterLP":      { "min": 0.0,  "max": 1.0,   "scale": "lin", "unit": "norm",  "owner": "controller",  "status": "verified",
+                     "notes": "Normalised 0–1 inside the engine; renderer maps median(filterLP)*18000 → Hz" },
+  "filterHP":      { "min": 0.0,  "max": 1.0,   "scale": "lin", "unit": "norm",  "owner": "controller",  "status": "verified",
+                     "notes": "Normalised 0–1; renderer maps median(filterHP)*120 → Hz" },
+  "filterRes":     { "min": 0.0,  "max": 1.0,   "scale": "lin", "unit": "norm",  "owner": "controller",  "status": "verified" },
+
+  "keyTrack":      { "min": 0.0,  "max": 1.0,   "scale": "lin", "unit": "norm",  "owner": "controller",  "status": "verified" },
+  "velMod":        { "min": 0.0,  "max": 1.0,   "scale": "lin", "unit": "norm",  "owner": "controller",  "status": "verified" },
+  "glideTime":     { "min": 0.0,  "max": 0.5,   "scale": "lin", "unit": "s",    "owner": "rule",        "status": "verified" },
+  "residualGain":  { "min": 0.0,  "max": 1.0,   "scale": "lin", "unit": "norm",  "owner": "controller",  "status": "verified",
+                     "musical_ceiling": 0.3,
+                     "notes": "Repo allows 0–1; hard-clamp to 0.3 for instrument use (guard layer)." },
+
+  "_guards": {
+    "hp_lt_lp_ratio": 0.5,
+    "res_soft_couple_additive": { "trigger_above": 0.7, "res_ceiling": 0.6 },
+    "max_delta_per_10ms": 0.08,
+    "min_total_level": 0.01,
+    "fallback_osc1_level": 0.05,
+    "power_sag_musical_ceiling": 0.6,
+    "residual_musical_ceiling": 0.3
+  }
+}
