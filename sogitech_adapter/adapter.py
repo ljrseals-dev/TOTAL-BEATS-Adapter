@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Dict, Optional
 import math
+import numpy as np
 
 from .features import build_features
 from .ranges import ParamRanges
@@ -88,7 +89,6 @@ class SogitechAdapter:
             "pressure": float(ev.pressure if ev.pressure is not None else 0.0),
         }
 
-        # Supply features with state before this event, then advance statistics.
         ctx.last_note = self.last_note
         ctx.brightness_history = list(self.brightness_hist)
         self._history_count += 1
@@ -101,8 +101,8 @@ class SogitechAdapter:
         ctx.ma_abs_pitch = self._ma_abs_pitch
 
         features = build_features(ev, ctx)
-        if len(features) != 64:
-            raise RuntimeError(f"feature contract broken: expected 64, got {len(features)}")
+        if features.shape != (64,) or not np.all(np.isfinite(features)):
+            raise ValueError("feature vector must contain exactly 64 finite values")
 
         if self.ctl is not None:
             pred = self.ctl.predict_dict(features)
