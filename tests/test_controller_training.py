@@ -4,6 +4,7 @@ import pytest
 from sogitech_adapter.controller import (
     CONTROLLER_CONTRACT,
     CONTINUOUS_NAMES,
+    CONTROLLER_OUTPUT_NAMES,
     ENUM_NAMES,
     FEATURE_CONTRACT,
     PARAMETER_CONTRACT,
@@ -46,6 +47,7 @@ def _valid_checkpoint_metadata(ranges):
         "feature_contract": FEATURE_CONTRACT,
         "parameter_contract": PARAMETER_CONTRACT,
         "parameter_names": list(REQUIRED_18),
+        "output_names": list(CONTROLLER_OUTPUT_NAMES),
         "enum_names": list(ENUM_NAMES),
         "continuous_names": list(CONTINUOUS_NAMES),
         "range_source_commit": ranges.source_commit,
@@ -102,6 +104,12 @@ def test_training_validation_split_keeps_source_groups_disjoint():
 def test_group_split_rejects_single_source_group():
     with pytest.raises(ValueError, match="two source groups"):
         _group_split(np.asarray(["only-one"] * 10), 0.2, 17)
+
+
+def test_controller_outputs_only_synthesis_owned_parameters():
+    assert len(CONTINUOUS_NAMES) == 12
+    assert len(CONTROLLER_OUTPUT_NAMES) == 14
+    assert not {"midiNote", "velocity", "pressure", "glideTime"} & set(CONTROLLER_OUTPUT_NAMES)
 
 
 def test_checkpoint_metadata_accepts_exact_contracts():
