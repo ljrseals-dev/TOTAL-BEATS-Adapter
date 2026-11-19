@@ -135,7 +135,8 @@ def _validate_checkpoint_metadata(checkpoint: dict, ranges: ParamRanges) -> None
         counts[field] = value
     if counts["sample_count"] != counts["training_sample_count"] + counts["validation_sample_count"]:
         raise ControllerError("checkpoint train/validation counts do not sum to sample_count")
-    if counts["sample_count"] < 10 or counts["source_group_count"] < 2:
+    if (counts["sample_count"] < 10 or counts["source_group_count"] < 2
+            or counts["source_group_count"] > counts["sample_count"]):
         raise ControllerError("checkpoint dataset is below the minimum sample/group requirement")
 
     metrics = checkpoint.get("validation_metrics")
@@ -146,7 +147,11 @@ def _validate_checkpoint_metadata(checkpoint: dict, ranges: ParamRanges) -> None
     if not isinstance(metrics, dict) or set(metrics) != metric_names:
         raise ControllerError("checkpoint validation_metrics schema is invalid")
     for name, value in metrics.items():
-        if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(float(value)):
+        try:
+            finite = math.isfinite(float(value))
+        except (OverflowError, TypeError, ValueError):
+            finite = False
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or not finite:
             raise ControllerError(f"checkpoint validation metric {name} must be finite")
     if metrics["loss"] < 0 or not 0 <= metrics["continuous_mae_normalized"] <= 1:
         raise ControllerError("checkpoint loss/MAE metrics are outside their valid ranges")
