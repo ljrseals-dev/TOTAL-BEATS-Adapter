@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from pathlib import Path
 from typing import Any, Dict
 
@@ -50,6 +51,10 @@ class ParamRanges:
             raise RangeError(f"unsupported parameter contract: {self.contract!r}")
         if meta.get("verified") is not True:
             raise RangeError("ranges.json is not marked verified")
+        source_commit = meta.get("source_commit")
+        if not isinstance(source_commit, str) or not re.fullmatch(r"[0-9a-f]{40}", source_commit):
+            raise RangeError("_meta.source_commit must be a pinned 40-character Git commit SHA")
+
         missing = [name for name in REQUIRED_18 if name not in self.fields]
         extra = [name for name in self.fields if name not in REQUIRED_18]
         if missing or extra or len(self.fields) != len(REQUIRED_18):
@@ -80,24 +85,29 @@ class ParamRanges:
 
         if not isinstance(self.guards, dict):
             raise RangeError("_guards must be an object")
-        ratio = self.guards.get("hp_lt_lp_ratio")
-        min_total = self.guards.get("min_total_level")
-        fallback = self.guards.get("fallback_osc1_level")
-        for key, value in (("hp_lt_lp_ratio", ratio), ("min_total_level", min_total),
-                           ("fallback_osc1_level", fallback),
-                           ("power_sag_musical_ceiling", self.guards.get("power_sag_musical_ceiling")),
-                           ("residual_musical_ceiling", self.guards.get("residual_musical_ceiling"))):
+        numeric_guards = {
+            "hp_lt_lp_ratio": self.guards.get("hp_lt_lp_ratio"),
+            "max_delta_per_10ms": self.guards.get("max_delta_per_10ms"),
+            "min_total_level": self.guards.get("min_total_level"),
+            "fallback_osc1_level": self.guards.get("fallback_osc1_level"),
+            "power_sag_musical_ceiling": self.guards.get("power_sag_musical_ceiling"),
+            "residual_musical_ceiling": self.guards.get("residual_musical_ceiling"),
+        }
+        for key, value in numeric_guards.items():
             if not self._finite_number(value):
                 raise RangeError(f"_guards.{key} must be a finite number")
-        if not 0.0 < ratio <= 1.0:
+        if not 0.0 < numeric_guards["hp_lt_lp_ratio"] <= 1.0:
             raise RangeError("_guards.hp_lt_lp_ratio must be in (0, 1]")
-        if not 0.0 <= min_total <= 4.0:
+        if numeric_guards["max_delta_per_10ms"] <= 0:
+            raise RangeError("_guards.max_delta_per_10ms must be positive")
+        if not 0.0 <= numeric_guards["min_total_level"] <= 4.0:
             raise RangeError("_guards.min_total_level must be in [0, 4]")
+        fallback = numeric_guards["fallback_osc1_level"]
         if not self.fields["osc1Level"]["min"] <= fallback <= self.fields["osc1Level"]["max"]:
             raise RangeError("_guards.fallback_osc1_level is outside osc1Level range")
         for key, field_name in (("power_sag_musical_ceiling", "powerSagDepth"),
                                 ("residual_musical_ceiling", "residualGain")):
-            ceiling = self.guards[key]
+            ceiling = numeric_guards[key]
             if not self.fields[field_name]["min"] <= ceiling <= self.fields[field_name]["max"]:
                 raise RangeError(f"_guards.{key} is outside {field_name} range")
         coupled = self.guards.get("res_soft_couple_additive")
