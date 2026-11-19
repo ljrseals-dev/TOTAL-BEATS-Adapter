@@ -1,7 +1,15 @@
 import numpy as np
 import pytest
 
-from sogitech_adapter.controller import load_controller
+from sogitech_adapter.controller import (
+    CONTROLLER_CONTRACT,
+    CONTINUOUS_NAMES,
+    ENUM_NAMES,
+    FEATURE_CONTRACT,
+    PARAMETER_CONTRACT,
+    _validate_checkpoint_metadata,
+    load_controller,
+)
 from sogitech_adapter.ranges import ParamRanges, REQUIRED_18
 from training.dataset import DatasetError, load_training_dataset
 from training.train_controller import _group_split
@@ -30,6 +38,30 @@ def _write_dataset(path, ranges, *, feature_contract="v1-64", violate_guard=Fals
         range_source_commit=np.asarray(ranges.source_commit),
         provenance=np.asarray("unit-test paired feature/parameter fixture"),
     )
+
+
+def _valid_checkpoint_metadata(ranges):
+    return {
+        "controller_contract": CONTROLLER_CONTRACT,
+        "feature_contract": FEATURE_CONTRACT,
+        "parameter_contract": PARAMETER_CONTRACT,
+        "parameter_names": list(REQUIRED_18),
+        "enum_names": list(ENUM_NAMES),
+        "continuous_names": list(CONTINUOUS_NAMES),
+        "range_source_commit": ranges.source_commit,
+        "dataset_sha256": "a" * 64,
+        "dataset_provenance": "unit-test reviewed paired dataset",
+        "sample_count": 10,
+        "training_sample_count": 5,
+        "validation_sample_count": 5,
+        "source_group_count": 2,
+        "validation_metrics": {
+            "loss": 0.1,
+            "continuous_mae_normalized": 0.1,
+            "osc1_wave_accuracy": 0.9,
+            "osc2_wave_accuracy": 0.9,
+        },
+    }
 
 
 def test_dataset_loader_accepts_versioned_paired_samples(tmp_path):
@@ -70,6 +102,19 @@ def test_training_validation_split_keeps_source_groups_disjoint():
 def test_group_split_rejects_single_source_group():
     with pytest.raises(ValueError, match="two source groups"):
         _group_split(np.asarray(["only-one"] * 10), 0.2, 17)
+
+
+def test_checkpoint_metadata_accepts_exact_contracts():
+    ranges = ParamRanges(RANGES_PATH)
+    _validate_checkpoint_metadata(_valid_checkpoint_metadata(ranges), ranges)
+
+
+def test_checkpoint_metadata_rejects_legacy_feature_contract():
+    ranges = ParamRanges(RANGES_PATH)
+    checkpoint = _valid_checkpoint_metadata(ranges)
+    checkpoint["feature_contract"] = "legacy-8-plus-zeros"
+    with pytest.raises(RuntimeError, match="feature_contract mismatch"):
+        _validate_checkpoint_metadata(checkpoint, ranges)
 
 
 def test_controller_loader_does_not_fabricate_missing_weights(tmp_path):
