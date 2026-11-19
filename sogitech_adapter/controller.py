@@ -1,7 +1,8 @@
 """Strict loader for trained v1-64 Sogitech parameter controllers.
 
-This controller is separate from Sogitech's legacy 18-output MLP: it has two
-categorical waveform heads and sixteen continuous parameter heads.
+The controller predicts twelve continuous synthesis controls and two categorical
+waveform selections. Note identity/velocity/pressure are event passthroughs and
+glideTime is a rule output, so the network does not waste targets on them.
 """
 from __future__ import annotations
 
@@ -17,7 +18,15 @@ CONTROLLER_CONTRACT = "sogitech.controller.v1-64"
 FEATURE_CONTRACT = "v1-64"
 PARAMETER_CONTRACT = "sogitech.params.v1"
 ENUM_NAMES = ("osc1Wave", "osc2Wave")
-CONTINUOUS_NAMES = tuple(name for name in REQUIRED_18 if name not in ENUM_NAMES)
+PASSTHROUGH_NAMES = ("midiNote", "velocity", "pressure")
+RULE_NAMES = ("glideTime",)
+CONTINUOUS_NAMES = tuple(
+    name for name in REQUIRED_18
+    if name not in ENUM_NAMES + PASSTHROUGH_NAMES + RULE_NAMES
+)
+CONTROLLER_OUTPUT_NAMES = tuple(
+    name for name in REQUIRED_18 if name not in PASSTHROUGH_NAMES + RULE_NAMES
+)
 
 
 class ControllerError(RuntimeError):
@@ -87,8 +96,8 @@ class TrainedParameterController:
         }
         result["osc1Wave"] = self.ranges.clamp("osc1Wave", osc1_index)
         result["osc2Wave"] = self.ranges.clamp("osc2Wave", osc2_index)
-        if set(result) != set(REQUIRED_18):
-            raise ControllerError("controller output does not match the 18-field parameter contract")
+        if set(result) != set(CONTROLLER_OUTPUT_NAMES):
+            raise ControllerError("controller output does not match the synthesis-control schema")
         return result
 
 
@@ -98,6 +107,7 @@ def _validate_checkpoint_metadata(checkpoint: dict, ranges: ParamRanges) -> None
         "feature_contract": FEATURE_CONTRACT,
         "parameter_contract": PARAMETER_CONTRACT,
         "parameter_names": list(REQUIRED_18),
+        "output_names": list(CONTROLLER_OUTPUT_NAMES),
         "enum_names": list(ENUM_NAMES),
         "continuous_names": list(CONTINUOUS_NAMES),
         "range_source_commit": ranges.source_commit,
