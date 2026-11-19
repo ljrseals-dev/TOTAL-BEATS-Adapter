@@ -1,12 +1,14 @@
 """Strict loader for trained v1-64 Sogitech parameter controllers.
 
-The network is intentionally separate from Sogitech's legacy 18-output MLP:
-this adapter has two categorical waveform heads and sixteen continuous heads.
+This controller is separate from Sogitech's legacy 18-output MLP: it has two
+categorical waveform heads and sixteen continuous parameter heads.
 """
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Dict
+import math
+import re
 import numpy as np
 
 from .ranges import ParamRanges, REQUIRED_18
@@ -90,6 +92,59 @@ class TrainedParameterController:
         return result
 
 
+def _validate_checkpoint_metadata(checkpoint: dict, ranges: ParamRanges) -> None:
+    expected = {
+        "controller_contract": CONTROLLER_CONTRACT,
+        "feature_contract": FEATURE_CONTRACT,
+        "parameter_contract": PARAMETER_CONTRACT,
+        "parameter_names": list(REQUIRED_18),
+        "enum_names": list(ENUM_NAMES),
+        "continuous_names": list(CONTINUOUS_NAMES),
+        "range_source_commit": ranges.source_commit,
+    }
+    for key, value in expected.items():
+        if checkpoint.get(key) != value:
+            raise ControllerError(
+                f"checkpoint {key} mismatch: expected {value!r}, got {checkpoint.get(key)!r}"
+            )
+
+    digest = checkpoint.get("dataset_sha256")
+    if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise ControllerError("checkpoint dataset_sha256 must be a 64-character SHA-256 digest")
+    provenance = checkpoint.get("dataset_provenance")
+    if not isinstance(provenance, str) or not provenance.strip():
+        raise ControllerError("checkpoint must contain non-empty dataset provenance")
+
+    count_fields = ("sample_count", "training_sample_count",
+                    "validation_sample_count", "source_group_count")
+    counts = {}
+    for field in count_fields:
+        value = checkpoint.get(field)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+            raise ControllerError(f"checkpoint {field} must be a positive integer")
+        counts[field] = value
+    if counts["sample_count"] != counts["training_sample_count"] + counts["validation_sample_count"]:
+        raise ControllerError("checkpoint train/validation counts do not sum to sample_count")
+    if counts["sample_count"] < 10 or counts["source_group_count"] < 2:
+        raise ControllerError("checkpoint dataset is below the minimum sample/group requirement")
+
+    metrics = checkpoint.get("validation_metrics")
+    metric_names = {
+        "loss", "continuous_mae_normalized",
+        "osc1_wave_accuracy", "osc2_wave_accuracy",
+    }
+    if not isinstance(metrics, dict) or set(metrics) != metric_names:
+        raise ControllerError("checkpoint validation_metrics schema is invalid")
+    for name, value in metrics.items():
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(float(value)):
+            raise ControllerError(f"checkpoint validation metric {name} must be finite")
+    if metrics["loss"] < 0 or not 0 <= metrics["continuous_mae_normalized"] <= 1:
+        raise ControllerError("checkpoint loss/MAE metrics are outside their valid ranges")
+    for name in ("osc1_wave_accuracy", "osc2_wave_accuracy"):
+        if not 0 <= metrics[name] <= 1:
+            raise ControllerError(f"checkpoint {name} must be in [0, 1]")
+
+
 def load_controller(path: str | Path, ranges: ParamRanges) -> TrainedParameterController:
     """Load only a checkpoint explicitly trained for this feature/range contract."""
     checkpoint_path = Path(path)
@@ -109,21 +164,7 @@ def load_controller(path: str | Path, ranges: ParamRanges) -> TrainedParameterCo
         raise ControllerError(f"unable to read controller checkpoint: {exc}") from exc
     if not isinstance(checkpoint, dict) or not isinstance(checkpoint.get("state_dict"), dict):
         raise ControllerError("checkpoint must contain a state_dict and versioned metadata")
-
-    expected = {
-        "controller_contract": CONTROLLER_CONTRACT,
-        "feature_contract": FEATURE_CONTRACT,
-        "parameter_contract": PARAMETER_CONTRACT,
-        "parameter_names": list(REQUIRED_18),
-        "enum_names": list(ENUM_NAMES),
-        "continuous_names": list(CONTINUOUS_NAMES),
-        "range_source_commit": ranges.source_commit,
-    }
-    for key, value in expected.items():
-        if checkpoint.get(key) != value:
-            raise ControllerError(
-                f"checkpoint {key} mismatch: expected {value!r}, got {checkpoint.get(key)!r}"
-            )
+    _validate_checkpoint_metadata(checkpoint, ranges)
 
     network = build_network(torch)
     try:
