@@ -37,6 +37,7 @@ class ParamRanges:
         meta = raw.pop("_meta", {})
         self.guards = raw.pop("_guards", {})
         self.contract = meta.get("contract", "unknown") if isinstance(meta, dict) else "unknown"
+        self.source_commit = meta.get("source_commit") if isinstance(meta, dict) else None
         self.fields: Dict[str, Dict[str, Any]] = raw
         self._validate(meta)
 
@@ -56,8 +57,7 @@ class ParamRanges:
             raise RangeError(f"unsupported parameter contract: {self.contract!r}")
         if meta.get("verified") is not True:
             raise RangeError("ranges.json is not marked verified")
-        source_commit = meta.get("source_commit")
-        if not isinstance(source_commit, str) or not re.fullmatch(r"[0-9a-f]{40}", source_commit):
+        if not isinstance(self.source_commit, str) or not re.fullmatch(r"[0-9a-f]{40}", self.source_commit):
             raise RangeError("_meta.source_commit must be a pinned 40-character Git commit SHA")
 
         missing = [name for name in REQUIRED_18 if name not in self.fields]
