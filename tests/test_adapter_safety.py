@@ -1,10 +1,13 @@
 import json
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from sogitech_adapter.adapter import SogitechAdapter
 from sogitech_adapter.events import GlobalContext, MusicalEvent
+from sogitech_adapter.features import build_features, EventStub, ContextStub
+from sogitech_adapter.guards import apply_all_guards
 from sogitech_adapter.ranges import ParamRanges, RangeError
 from sogitech_adapter.timing import FramePolicy, FrameSmoother
 from sogitech_adapter.validation import validate_event, validate_frame
@@ -84,10 +87,55 @@ def test_adapter_updates_rolling_context_statistics():
     assert context.ma_abs_pitch == pytest.approx(66.0)
 
 
+def test_guards_enforce_ceilings_filter_relationship_and_minimum_level():
+    ranges = ParamRanges(RANGES)
+    frame = {
+        "midiNote": 60.0, "velocity": 0.8, "pressure": 0.0,
+        "osc1Wave": 1.0, "osc2Wave": 2.0,
+        "osc1Level": 0.0, "osc2Level": 0.0, "subLevel": 0.0, "noiseLevel": 0.0,
+        "additiveBlend": 0.95, "powerSagDepth": 1.0,
+        "filterLP": 0.4, "filterHP": 0.9, "filterRes": 0.95,
+        "keyTrack": 0.5, "velMod": 0.5, "glideTime": 0.1, "residualGain": 1.0,
+    }
+    guarded = apply_all_guards(frame, ranges)
+    assert guarded["powerSagDepth"] <= 0.6
+    assert guarded["residualGain"] <= 0.3
+    assert guarded["filterHP"] <= 0.5 * guarded["filterLP"]
+    assert guarded["filterRes"] <= 0.6
+    assert guarded["osc1Level"] == pytest.approx(0.05)
+    assert not validate_frame(guarded, ranges)
+
+
+def test_frame_validation_rejects_fractional_waveform_enum():
+    ranges = ParamRanges(RANGES)
+    frame = {
+        "midiNote": 60.0, "velocity": 0.8, "pressure": 0.0,
+        "osc1Wave": 1.5, "osc2Wave": 2.0,
+        "osc1Level": 0.7, "osc2Level": 0.2, "subLevel": 0.1, "noiseLevel": 0.0,
+        "additiveBlend": 0.2, "powerSagDepth": 0.2,
+        "filterLP": 0.7, "filterHP": 0.1, "filterRes": 0.2,
+        "keyTrack": 0.5, "velMod": 0.5, "glideTime": 0.0, "residualGain": 0.0,
+    }
+    assert any("enum value" in problem for problem in validate_frame(frame, ranges))
+
+
 def test_event_validation_rejects_nan_and_noninteger_pitch():
     assert validate_event(MusicalEvent(velocity=float("nan")))
     assert validate_event(MusicalEvent(pressure=float("inf")))
     assert validate_event(MusicalEvent(midiNote=60.5))
+
+
+def test_reference_audio_rejects_nonfinite_samples():
+    context = ContextStub(ref_audio=np.array([0.0, float("nan")], dtype=np.float32))
+    with pytest.raises(ValueError, match="finite samples"):
+        build_features(EventStub(), context)
+
+
+def test_frame_policy_rejects_invalid_configuration():
+    with pytest.raises(ValueError, match="mode"):
+        FramePolicy(mode="automatic")
+    with pytest.raises(ValueError, match="smooth_tau_ms"):
+        FramePolicy(smooth_tau_ms=0.0)
 
 
 def test_evolving_smoother_preserves_event_fields_and_rate_limits_controls():
