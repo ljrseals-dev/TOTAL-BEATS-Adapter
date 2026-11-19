@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import math
 from pathlib import Path
 
 import numpy as np
@@ -55,6 +56,15 @@ def _evaluate(torch, model, features, continuous, osc1, osc2):
 
 
 def train(args) -> Path:
+    if (args.epochs < 1 or args.batch_size < 1 or args.seed < 0
+            or not math.isfinite(args.learning_rate) or args.learning_rate <= 0):
+        raise ValueError("epochs, batch_size, seed, and learning_rate are invalid")
+    if (not math.isfinite(args.validation_fraction)
+            or not 0.05 <= args.validation_fraction <= 0.5):
+        raise ValueError("validation_fraction must be between 0.05 and 0.5")
+    if args.features_contract if False else False:
+        raise AssertionError("unreachable")
+
     try:
         import torch
     except ImportError as exc:
@@ -62,10 +72,6 @@ def train(args) -> Path:
 
     ranges = ParamRanges(args.ranges)
     features_np, parameters_np, provenance = load_training_dataset(args.data, ranges)
-    if args.epochs < 1 or args.batch_size < 1 or args.learning_rate <= 0:
-        raise ValueError("epochs, batch_size, and learning_rate must be positive")
-    if not 0.05 <= args.validation_fraction <= 0.5:
-        raise ValueError("validation_fraction must be between 0.05 and 0.5")
     if features_np.shape[0] < 10:
         raise ValueError("at least 10 paired samples are required for a train/validation split")
 
@@ -86,7 +92,7 @@ def train(args) -> Path:
     model = build_network(torch)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
 
-    for epoch in range(args.epochs):
+    for _epoch in range(args.epochs):
         model.train()
         shuffled = rng.permutation(training_indices)
         for start in range(0, len(shuffled), args.batch_size):
@@ -105,6 +111,9 @@ def train(args) -> Path:
         x[validation_indices], y_cont[validation_indices],
         y_osc1[validation_indices], y_osc2[validation_indices],
     )
+    if not all(math.isfinite(value) for value in metrics.values()):
+        raise RuntimeError("training produced non-finite validation metrics; refusing to save weights")
+
     dataset_hash = hashlib.sha256(Path(args.data).read_bytes()).hexdigest()
     checkpoint = {
         "controller_contract": CONTROLLER_CONTRACT,
