@@ -80,7 +80,7 @@ TOTAL-BEATS-Adapter/
 4. **Fail loudly.** Unverified ranges, malformed frames, and missing production controller weights raise hard errors.
 5. **Demo mode is explicit.** Fixed safe defaults are available only when `allow_safe_defaults=True`; they are not neural predictions.
 6. **No incompatible checkpoints.** Controller weights must declare the exact feature, parameter, controller, and range-source contracts.
-7. **No fabricated training data.** The trainer accepts only paired feature/parameter datasets with provenance and guard validation.
+7. **No fabricated training data.** The trainer accepts only paired feature/parameter datasets with provenance and guard validation, and holds out complete source groups.
 
 ---
 
