@@ -32,6 +32,15 @@ def test_ranges_reject_nonfinite_or_inverted_bounds(tmp_path):
         ParamRanges(path)
 
 
+def test_ranges_require_pinned_upstream_commit(tmp_path):
+    raw = json.loads(RANGES.read_text(encoding="utf-8"))
+    raw["_meta"]["source_commit"] = "main"
+    path = tmp_path / "ranges.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(RangeError, match="pinned 40-character"):
+        ParamRanges(path)
+
+
 def test_normalization_round_trip_and_enum():
     ranges = ParamRanges(RANGES)
     for name in ("velocity", "filterLP", "glideTime", "powerSagDepth"):
@@ -60,6 +69,19 @@ def test_demo_adapter_emits_exact_18_field_frame():
     frame = adapter.on_event(event, GlobalContext())
     assert len(frame) == 18
     assert not validate_frame(frame, adapter.ranges)
+
+
+def test_adapter_updates_rolling_context_statistics():
+    adapter = SogitechAdapter(ParamRanges(RANGES), allow_safe_defaults=True)
+    context = GlobalContext()
+    adapter.on_event(MusicalEvent(velocity=0.7, brightness=0.4, midiNote=60), context)
+    assert context.ma_velocity == pytest.approx(0.7)
+    assert context.ma_brightness == pytest.approx(0.4)
+    assert context.ma_abs_pitch == pytest.approx(60.0)
+    adapter.on_event(MusicalEvent(velocity=0.9, brightness=0.8, midiNote=72, startTime=0.1), context)
+    assert context.ma_velocity == pytest.approx(0.8)
+    assert context.ma_brightness == pytest.approx(0.6)
+    assert context.ma_abs_pitch == pytest.approx(66.0)
 
 
 def test_event_validation_rejects_nan_and_noninteger_pitch():
