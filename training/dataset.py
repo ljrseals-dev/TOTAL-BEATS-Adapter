@@ -42,7 +42,7 @@ def load_training_dataset(path: str | Path, ranges: ParamRanges):
             parameter_names = [str(item) for item in np.asarray(archive["parameter_names"]).tolist()]
             features = np.asarray(archive["features"], dtype=np.float32)
             parameters = np.asarray(archive["parameters"], dtype=np.float64)
-            groups = np.asarray(archive["groups"]).astype(str).reshape(-1)
+            groups = np.asarray(archive["groups"]).astype(str)
         except (TypeError, ValueError) as exc:
             raise DatasetError(f"invalid dataset metadata or array dtype: {exc}") from exc
 
