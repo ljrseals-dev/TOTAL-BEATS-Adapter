@@ -42,7 +42,12 @@ class ParamRanges:
 
     @staticmethod
     def _finite_number(value: Any) -> bool:
-        return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            return False
+        try:
+            return math.isfinite(float(value))
+        except (OverflowError, TypeError, ValueError):
+            return False
 
     def _validate(self, meta: dict) -> None:
         if not isinstance(meta, dict):
@@ -132,7 +137,7 @@ class ParamRanges:
         spec = self.fields[name]
         bounded = max(float(spec["min"]), min(float(spec["max"]), value))
         if spec["scale"] == "enum":
-            bounded = float(round(bounded))
+            bounded = float(math.floor(bounded + 0.5))
         return bounded
 
     def to_norm(self, name: str, value: float) -> float:
