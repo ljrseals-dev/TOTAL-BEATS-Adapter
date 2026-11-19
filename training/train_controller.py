@@ -62,8 +62,6 @@ def train(args) -> Path:
     if (not math.isfinite(args.validation_fraction)
             or not 0.05 <= args.validation_fraction <= 0.5):
         raise ValueError("validation_fraction must be between 0.05 and 0.5")
-    if args.features_contract if False else False:
-        raise AssertionError("unreachable")
 
     try:
         import torch
