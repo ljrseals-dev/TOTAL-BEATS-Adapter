@@ -126,7 +126,11 @@ def train(args) -> Path:
     if not all(math.isfinite(value) for value in metrics.values()):
         raise RuntimeError("training produced non-finite validation metrics; refusing to save weights")
 
-    dataset_hash = hashlib.sha256(Path(args.data).read_bytes()).hexdigest()
+    digest = hashlib.sha256()
+    with Path(args.data).open("rb") as dataset_stream:
+        for chunk in iter(lambda: dataset_stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+
     checkpoint = {
         "controller_contract": CONTROLLER_CONTRACT,
         "feature_contract": FEATURE_CONTRACT,
@@ -137,7 +141,7 @@ def train(args) -> Path:
         "continuous_names": list(CONTINUOUS_NAMES),
         "range_source_commit": ranges.source_commit,
         "state_dict": model.state_dict(),
-        "dataset_sha256": dataset_hash,
+        "dataset_sha256": digest.hexdigest(),
         "dataset_provenance": provenance,
         "source_group_count": int(np.unique(groups).size),
         "sample_count": int(features_np.shape[0]),
@@ -150,6 +154,8 @@ def train(args) -> Path:
     }
 
     output = Path(args.out)
+    if output.resolve() == Path(args.data).resolve():
+        raise ValueError("checkpoint output path must not overwrite the training dataset")
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = output.with_name(output.name + ".tmp")
     torch.save(checkpoint, temporary)
