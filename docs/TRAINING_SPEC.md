@@ -9,9 +9,11 @@ The adapter controller is trained for:
 - Feature input: exactly 64 values, contract `sogitech.features.v1-64`.
 - Parameter targets: exactly 18 physical values in the canonical order in `ranges.json`.
 - Range provenance: the exact pinned Sogitech commit recorded by `ranges.json`.
-- Controller architecture: 64 → 128 → 128, with 16 bounded continuous outputs and two four-class waveform heads.
+- Controller architecture: 64 → 128 → 128, with twelve bounded continuous synthesis-control outputs and two four-class waveform heads.
 
-Do not load the legacy Sogitech controller checkpoint merely because it has 64 input dimensions. The upstream legacy training script constructs a different 64-value vector (eight audio-analysis values followed by zeros), not this repository's v1-64 feature layout. Its checkpoint is intentionally rejected by this loader unless it carries this adapter's exact controller, feature, parameter, and range-source metadata.
+The network does not predict MIDI note, velocity, pressure, or glideTime: the first three are event passthroughs and glideTime is a deterministic adapter rule. These fields remain in the 18-field dataset target contract for alignment and validation, but are not learned outputs.
+
+Do not load the legacy Sogitech controller checkpoint merely because it has 64 input dimensions. The upstream legacy training script constructs a different 64-value vector (eight audio-analysis values followed by zeros), not this repository's v1-64 feature layout. Its checkpoint is intentionally rejected by this loader unless it carries this adapter's exact controller, feature, parameter, output, and range-source metadata.
 
 ## Dataset and leakage controls
 
@@ -31,7 +33,7 @@ The trainer holds out entire source groups for validation; rows from the same so
 
 ## Training objective
 
-- Smooth L1 loss on the sixteen continuous parameters after range-aware normalization.
+- Smooth L1 loss on the twelve continuous synthesis controls after range-aware normalization.
 - Cross-entropy loss for osc1Wave and osc2Wave categorical outputs.
 - Fixed seeded, source-group-held-out train/validation split.
 - Validation loss, normalized continuous MAE, and per-oscillator waveform accuracy are stored in the checkpoint.
