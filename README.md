@@ -10,17 +10,19 @@ Converts compositional intelligence (musical events + context) into expressive, 
 
 | Phase | Component                        | State              |
 |-------|----------------------------------|--------------------|
-| 0     | Contract integrity                 | **Complete**       |
-| 1     | Production-grade adapter         | **Substantial**    |
+| 0     | Contract integrity               | **Complete**       |
+| 1     | Production-grade adapter         | **Repair in progress** |
 | 2     | Neural controller + training     | Not started        |
-| 3     | Guard + timing system            | Partial (core done)|
+| 3     | Guard + timing system            | **Core repairs in progress** |
 | 4     | Polyphonic Sogitech integration  | Design only        |
 | 5     | Offline audio rendering          | Not started        |
 | 6     | Learned audio embedding          | Stub only          |
 | 7     | Mixing and mastering             | Not started        |
 | 8     | Complete album production        | Spec only          |
 
-**Contract defect fixed:** `brightness_hist_7` is correctly at index 43; `audio_emb_0` at index 44.
+**Feature contract:** `brightness_hist_7` is index 43; `audio_emb_0` is index 44.
+
+**Parameter source pin:** `ranges.json` is checked against Sogitech commit `1a40ed625743d16e41341a0a3c08d0a2b6f45ff5`, not a moving branch name.
 
 ---
 
@@ -38,9 +40,11 @@ python -c "from sogitech_adapter import ParamRanges; r = ParamRanges('ranges.jso
 # Run tests
 pytest tests/ -v
 
-# Smoke the adapter
+# Smoke the adapter with explicitly enabled demo defaults (not neural inference)
 python scripts/smoke_adapter.py
 ```
+
+Production use must pass a trained controller to `SogitechAdapter`. The smoke script opts into fixed demo defaults explicitly; missing trained weights are never silently treated as a trained model.
 
 ---
 
@@ -48,32 +52,20 @@ python scripts/smoke_adapter.py
 
 ```
 TOTAL-BEATS-Adapter/
-├── ranges.json                     # verified 18-field ranges
+├── ranges.json
 ├── sogitech_adapter/
-│   ├── adapter.py                  # MusicalEvent → 18-field frame
-│   ├── features.py                 # 64-dim Feature Constructor (v1-64)
-│   ├── ranges.py                   # loader that refuses unverified ranges
-│   ├── events.py                   # MusicalEvent + GlobalContext
-│   ├── guards.py                   # musical safety guards
-│   ├── timing.py                   # FramePolicy + smoother
-│   └── validation.py               # event and frame validators
+│   ├── adapter.py
+│   ├── features.py
+│   ├── ranges.py
+│   ├── events.py
+│   ├── guards.py
+│   ├── timing.py
+│   └── validation.py
 ├── docs/
-│   ├── ARCHITECTURE.md
-│   ├── FEATURE_CONTRACT_v1-64.md
-│   ├── PARAMETER_CONTRACT_v1.md
-│   ├── INTEGRATION_SPEC.md
-│   ├── POLYPHONY_DESIGN.md
-│   ├── TRAINING_SPEC.md
-│   ├── RENDERING_SPEC.md
-│   └── ALBUM_PRODUCTION.md
 ├── tests/
-│   └── test_contract_v1_64.py
-├── scripts/
-│   └── smoke_adapter.py
-├── training/                       # (scaffolding)
-├── audio/                          # (scaffolding)
-├── embeddings/                     # (scaffolding)
-├── album/                          # (scaffolding)
+│   ├── test_contract_v1_64.py
+│   └── test_adapter_safety.py
+├── scripts/smoke_adapter.py
 └── .github/workflows/tests.yml
 ```
 
@@ -81,11 +73,12 @@ TOTAL-BEATS-Adapter/
 
 ## Core design rules
 
-1. **Composition never emits synthesis parameters.** TOTAL BEATS emits `MusicalEvent`s + context.
+1. **Composition never emits synthesis parameters.** TOTAL BEATS emits `MusicalEvent` objects and context.
 2. **Synthesis never decides musical structure.** Sogitech only consumes 18-field frames.
-3. **Contracts are frozen.** 64-dim features and 18-field parameters are versioned.
-4. **Fail loudly.** Unverified ranges or missing controller weights raise hard errors.
-5. **Do not invent trained weights.** The controller refuses random initialisation.
+3. **Contracts are versioned.** The 64-dim feature vector and 18-field parameter frame are frozen interfaces.
+4. **Fail loudly.** Unverified or malformed ranges and missing production controller weights raise hard errors.
+5. **Demo mode is explicit.** Fixed safe defaults are available only when `allow_safe_defaults=True`; they are not neural predictions.
+6. **Do not invent trained weights.** The adapter does not initialise or substitute a random controller.
 
 ---
 
@@ -93,8 +86,6 @@ TOTAL-BEATS-Adapter/
 
 - **Sogitech** — https://github.com/ljrseals-dev/Sogitech (MIT)
 - **TOTAL BEATS** — generative music engine by Lewis James Seals Jr.
-
----
 
 ## License
 
