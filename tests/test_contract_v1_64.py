@@ -42,7 +42,8 @@ def test_feature_names_are_stable():
     assert len(FEATURE_NAMES) == DIM
     assert FEATURE_NAMES[0]  == "midi_note_norm"
     assert FEATURE_NAMES[15] == "pan"
-    assert FEATURE_NAMES[44] == "brightness_hist_7"
+    assert FEATURE_NAMES[43] == "brightness_hist_7"   # D block ends at 43
+    assert FEATURE_NAMES[44] == "audio_emb_0"         # E block starts at 44
     assert FEATURE_NAMES[60] == "pool_mean"
 
 def test_normalization_stats_frozen():

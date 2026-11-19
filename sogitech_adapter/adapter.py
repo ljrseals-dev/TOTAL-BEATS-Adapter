@@ -1,20 +1,15 @@
 """Core adapter: MusicalEvent + context → 18-field Sogitech parameter frame."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 import copy
 
-from .features import EventStub, ContextStub, build_features, CONTRACT_VERSION
+from .features import build_features, CONTRACT_VERSION
 from .ranges import ParamRanges
-
-
-@dataclass
-class FramePolicy:
-    """Timing / emission policy."""
-    mode: str = "static"          # "static" | "evolving"
-    control_rate_hz: float = 100.0
-    smooth_tau_ms: float = 30.0   # exponential smoothing time constant
+from .events import MusicalEvent, GlobalContext
+from .guards import apply_all_guards
+from .timing import FramePolicy, FrameSmoother
+from .validation import validate_event, validate_frame
 
 
 class SogitechAdapter:
@@ -35,11 +30,15 @@ class SogitechAdapter:
         self.ranges = ranges
         self.ctl = controller          # must be a loaded, non-random controller
         self.policy = policy or FramePolicy()
-        self.prev_frame: Optional[Dict[str, float]] = None
+        self.smoother = FrameSmoother(self.policy)
         self.last_note: Optional[int] = None
         self.brightness_hist = [0.5] * 8
 
-    def on_event(self, ev: EventStub, ctx: ContextStub, t: float = 0.0) -> Dict[str, float]:
+    def on_event(self, ev: MusicalEvent, ctx: GlobalContext, t: float = 0.0) -> Dict[str, float]:
+        problems = validate_event(ev)
+        if problems:
+            raise ValueError(f"invalid MusicalEvent: {problems}")
+
         # ---- pass-through fields
         frame: Dict[str, float] = {
             "midiNote": float(ev.midiNote),
@@ -52,15 +51,14 @@ class SogitechAdapter:
         ctx.brightness_history = list(self.brightness_hist)
         self.brightness_hist = (self.brightness_hist + [ev.brightness])[-8:]
 
-        # ---- features
+        # ---- features (still accepts EventStub/ContextStub shapes via duck typing)
         f = build_features(ev, ctx)
-        assert len(f) == 64
+        assert len(f) == 64, f"feature contract broken: got {len(f)}"
 
-        # ---- controller (or safe defaults if none loaded)
+        # ---- controller (or safe musical defaults if none loaded)
         if self.ctl is not None:
-            pred = self.ctl.predict_dict(f)  # expects 64-dim → 18-param dict
+            pred = self.ctl.predict_dict(f)
         else:
-            # Safe musical defaults when controller is not yet trained
             pred = {
                 "osc1Wave": 1.0, "osc2Wave": 2.0,
                 "osc1Level": 0.72, "osc2Level": 0.42,
@@ -74,10 +72,10 @@ class SogitechAdapter:
         # ---- rule-derived glide
         pred["glideTime"] = self._glide_rule(ev, ctx)
 
-        # ---- merge
+        # ---- merge predictions
         for k, v in pred.items():
             if k not in frame:
-                frame[k] = v
+                frame[k] = float(v)
 
         # ---- clamp to legal ranges
         for k in list(frame.keys()):
@@ -85,16 +83,20 @@ class SogitechAdapter:
                 frame[k] = self.ranges.clamp(k, frame[k])
 
         # ---- musical guards
-        frame = self.ranges.apply_musical_ceilings(frame)
-        frame = self._guard_hp_lp(frame)
-        frame = self._guard_levels(frame)
-        frame = self._rate_limit(frame)
+        frame = apply_all_guards(frame, self.ranges)
 
-        self.prev_frame = copy.deepcopy(frame)
+        # ---- timing / smoothing
+        frame = self.smoother.process(frame)
+
+        # ---- final validation
+        problems = validate_frame(frame, self.ranges)
+        if problems:
+            raise RuntimeError(f"guarded frame still invalid: {problems}")
+
         self.last_note = ev.midiNote
         return frame
 
-    def _glide_rule(self, ev: EventStub, ctx: ContextStub) -> float:
+    def _glide_rule(self, ev: MusicalEvent, ctx: GlobalContext) -> float:
         if self.last_note is None:
             return 0.0
         leap = abs(ev.midiNote - self.last_note)
@@ -102,36 +104,3 @@ class SogitechAdapter:
         if sparse and leap >= 5:
             return min(0.5, (leap / 12.0) * 0.25)
         return 0.0
-
-    def _guard_hp_lp(self, frame: Dict[str, float]) -> Dict[str, float]:
-        """Enforce HP < ratio * LP (normalised space)."""
-        ratio = self.ranges.guards.get("hp_lt_lp_ratio", 0.5)
-        lp = frame.get("filterLP", 0.7)
-        hp = frame.get("filterHP", 0.05)
-        if hp > ratio * lp:
-            frame["filterHP"] = ratio * lp
-        return frame
-
-    def _guard_levels(self, frame: Dict[str, float]) -> Dict[str, float]:
-        total = (
-            frame.get("osc1Level", 0) + frame.get("osc2Level", 0) +
-            frame.get("subLevel", 0) + frame.get("noiseLevel", 0)
-        )
-        min_total = self.ranges.guards.get("min_total_level", 0.01)
-        if total < min_total:
-            frame["osc1Level"] = self.ranges.guards.get("fallback_osc1_level", 0.05)
-        return frame
-
-    def _rate_limit(self, frame: Dict[str, float]) -> Dict[str, float]:
-        if self.prev_frame is None:
-            return frame
-        max_delta = self.ranges.guards.get("max_delta_per_10ms", 0.08)
-        out = {}
-        for k, v in frame.items():
-            prev = self.prev_frame.get(k, v)
-            # simple hard clamp for now; exponential smoothing can replace this
-            delta = v - prev
-            if abs(delta) > max_delta:
-                v = prev + max_delta * (1.0 if delta > 0 else -1.0)
-            out[k] = v
-        return out
