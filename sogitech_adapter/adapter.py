@@ -76,9 +76,12 @@ class SogitechAdapter:
         if problems:
             raise ValueError(f"invalid MusicalEvent: {problems}")
 
-        timestamp = ev.startTime if t is None else t
-        if (not isinstance(timestamp, (int, float)) or isinstance(timestamp, bool)
-                or not math.isfinite(timestamp) or timestamp < 0):
+        raw_timestamp = ev.startTime if t is None else t
+        try:
+            timestamp = float(raw_timestamp)
+        except (OverflowError, TypeError, ValueError) as exc:
+            raise ValueError("event timestamp must be a finite non-negative number") from exc
+        if not math.isfinite(timestamp) or timestamp < 0:
             raise ValueError("event timestamp must be a finite non-negative number")
         if self._last_event_time is not None and timestamp < self._last_event_time:
             raise ValueError("events must be supplied in non-decreasing time order")
@@ -136,7 +139,7 @@ class SogitechAdapter:
 
         self.last_note = ev.midiNote
         self.brightness_hist = (self.brightness_hist + [float(ev.brightness)])[-8:]
-        self._last_event_time = float(timestamp)
+        self._last_event_time = timestamp
         return frame
 
     def _glide_rule(self, ev: MusicalEvent, ctx: GlobalContext) -> float:
