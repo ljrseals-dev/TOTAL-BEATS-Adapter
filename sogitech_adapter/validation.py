@@ -32,13 +32,20 @@ def validate_frame(frame: Dict[str, float], ranges: ParamRanges) -> List[str]:
         if key not in frame:
             continue
         value = frame[key]
-        if (not isinstance(value, (int, float)) or isinstance(value, bool)
-                or not math.isfinite(value)):
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
             problems.append(f"{key}: value must be a finite number, got {value!r}")
             continue
+        try:
+            finite_value = float(value)
+        except (OverflowError, TypeError, ValueError):
+            problems.append(f"{key}: value must be a finite number, got {value!r}")
+            continue
+        if not math.isfinite(finite_value):
+            problems.append(f"{key}: value must be finite, got {value!r}")
+            continue
         spec = ranges.fields[key]
-        if value < spec["min"] or value > spec["max"]:
-            problems.append(f"{key}: {value} outside [{spec['min']}, {spec['max']}]")
-        if spec["scale"] == "enum" and not float(value).is_integer():
-            problems.append(f"{key}: enum value must be an integer, got {value}")
+        if finite_value < spec["min"] or finite_value > spec["max"]:
+            problems.append(f"{key}: {finite_value} outside [{spec['min']}, {spec['max']}]")
+        if spec["scale"] == "enum" and not finite_value.is_integer():
+            problems.append(f"{key}: enum value must be an integer, got {finite_value}")
     return problems
