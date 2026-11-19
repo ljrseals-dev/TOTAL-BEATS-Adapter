@@ -15,6 +15,7 @@ import numpy as np
 from sogitech_adapter.controller import (
     CONTROLLER_CONTRACT,
     CONTINUOUS_NAMES,
+    CONTROLLER_OUTPUT_NAMES,
     ENUM_NAMES,
     FEATURE_CONTRACT,
     PARAMETER_CONTRACT,
@@ -131,6 +132,7 @@ def train(args) -> Path:
         "feature_contract": FEATURE_CONTRACT,
         "parameter_contract": PARAMETER_CONTRACT,
         "parameter_names": list(REQUIRED_18),
+        "output_names": list(CONTROLLER_OUTPUT_NAMES),
         "enum_names": list(ENUM_NAMES),
         "continuous_names": list(CONTINUOUS_NAMES),
         "range_source_commit": ranges.source_commit,
