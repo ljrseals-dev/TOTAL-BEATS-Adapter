@@ -45,7 +45,9 @@ class SogitechAdapter:
         self.ranges = ranges
         self.ctl = controller
         self.allow_safe_defaults = allow_safe_defaults
-        self.policy = policy or FramePolicy()
+        self.policy = policy or FramePolicy(
+            max_delta_per_10ms=float(ranges.guards["max_delta_per_10ms"])
+        )
         self.smoother = FrameSmoother(self.policy)
         self.last_note: Optional[int] = None
         self.brightness_hist = [0.5] * 8
@@ -107,7 +109,6 @@ class SogitechAdapter:
             if not isinstance(pred, dict):
                 raise RuntimeError("controller.predict_dict must return a dictionary")
         else:
-            # Explicit demo mode only; fixed defaults are not trained output.
             pred = dict(DEMO_DEFAULTS)
 
         pred = dict(pred)
@@ -127,7 +128,6 @@ class SogitechAdapter:
         dt_ms = (1000.0 / self.policy.control_rate_hz if self._last_event_time is None
                  else (timestamp - self._last_event_time) * 1000.0)
         frame = self.smoother.process(frame, dt_ms=dt_ms)
-        # Re-apply hard constraints after interpolation.
         frame = apply_all_guards(frame, self.ranges)
 
         problems = validate_frame(frame, self.ranges)
