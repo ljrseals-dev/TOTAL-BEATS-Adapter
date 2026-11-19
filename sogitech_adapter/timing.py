@@ -1,69 +1,68 @@
-"""Frame emission and timing policy."""
+"""Frame emission and timing policy with event-safe passthrough fields."""
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Dict, Optional
 import copy
+import math
 
 
 @dataclass
 class FramePolicy:
-    """Controls how and when parameter frames are emitted."""
+    """Controls frame interpolation; event identity and expression stay exact."""
     mode: str = "static"              # "static" | "evolving"
     control_rate_hz: float = 100.0
-    smooth_tau_ms: float = 30.0       # exponential smoothing time constant
+    smooth_tau_ms: float = 30.0
     max_delta_per_10ms: float = 0.08
+
+    def __post_init__(self) -> None:
+        if self.mode not in {"static", "evolving"}:
+            raise ValueError("mode must be 'static' or 'evolving'")
+        for name, value in (("control_rate_hz", self.control_rate_hz),
+                            ("smooth_tau_ms", self.smooth_tau_ms),
+                            ("max_delta_per_10ms", self.max_delta_per_10ms)):
+            if (not isinstance(value, (int, float)) or isinstance(value, bool)
+                    or not math.isfinite(value) or value <= 0):
+                raise ValueError(f"{name} must be a finite positive number")
 
 
 class FrameSmoother:
-    """Per-field exponential smoothing with rate limiting.
+    """Rate-limit and smooth only continuous synthesis controls.
 
-    Important: discrete fields (midiNote) and some expressive fields
-    should not be smoothed the same way as continuous synthesis controls.
+    Note identity, note velocity/pressure, and oscillator waveform selections
+    are event/discrete values and must not be interpolated.
     """
-
-    # Fields that must jump immediately (no smoothing)
-    INSTANT_FIELDS = {"midiNote"}
-
-    # Fields that may be lightly smoothed
-    EXPRESSIVE_FIELDS = {"velocity", "pressure"}
+    INSTANT_FIELDS = {"midiNote", "velocity", "pressure", "osc1Wave", "osc2Wave"}
 
     def __init__(self, policy: FramePolicy):
         self.policy = policy
         self.prev: Optional[Dict[str, float]] = None
 
-    def process(self, frame: Dict[str, float], dt_ms: float = 10.0) -> Dict[str, float]:
-        if self.prev is None or self.policy.mode == "static":
+    def reset(self) -> None:
+        self.prev = None
+
+    def process(self, frame: Dict[str, float], dt_ms: Optional[float] = None) -> Dict[str, float]:
+        if dt_ms is None:
+            dt_ms = 1000.0 / self.policy.control_rate_hz
+        if (not isinstance(dt_ms, (int, float)) or isinstance(dt_ms, bool)
+                or not math.isfinite(dt_ms) or dt_ms < 0):
+            raise ValueError("dt_ms must be a finite non-negative number")
+        if self.prev is None or self.policy.mode == "static" or dt_ms == 0:
             self.prev = copy.deepcopy(frame)
-            return frame
+            return dict(frame)
 
-        out = {}
-        alpha = self._alpha(dt_ms)
+        alpha = 1.0 - math.exp(-dt_ms / self.policy.smooth_tau_ms)
         max_delta = self.policy.max_delta_per_10ms * (dt_ms / 10.0)
-
-        for k, v in frame.items():
-            prev = self.prev.get(k, v)
-
-            if k in self.INSTANT_FIELDS:
-                out[k] = v
+        out: Dict[str, float] = {}
+        for key, target in frame.items():
+            previous = self.prev.get(key, target)
+            if key in self.INSTANT_FIELDS:
+                out[key] = target
                 continue
-
-            # rate limit
-            delta = v - prev
+            delta = target - previous
             if abs(delta) > max_delta:
-                v = prev + max_delta * (1.0 if delta > 0 else -1.0)
-
-            # exponential approach
-            if k in self.EXPRESSIVE_FIELDS:
-                # lighter smoothing for velocity / pressure
-                out[k] = prev + 0.5 * (v - prev)
-            else:
-                out[k] = prev + alpha * (v - prev)
+                target = previous + math.copysign(max_delta, delta)
+            out[key] = previous + alpha * (target - previous)
 
         self.prev = copy.deepcopy(out)
         return out
-
-    def _alpha(self, dt_ms: float) -> float:
-        # simple conversion from time-constant to mixing coefficient
-        tau = max(self.policy.smooth_tau_ms, 1.0)
-        return min(1.0, dt_ms / tau)
