@@ -20,4 +20,4 @@ train = ["torch>=2.0"]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["sogitech_adapter*"]
+include = ["sogitech_adapter*", "training*"]
