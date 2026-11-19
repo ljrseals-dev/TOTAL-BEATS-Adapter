@@ -13,26 +13,29 @@ The adapter controller is trained for:
 
 Do not load the legacy Sogitech controller checkpoint merely because it has 64 input dimensions. The upstream legacy training script constructs a different 64-value vector (eight audio-analysis values followed by zeros), not this repository's v1-64 feature layout. Its checkpoint is intentionally rejected by this loader unless it carries this adapter's exact controller, feature, parameter, and range-source metadata.
 
-## Dataset format
+## Dataset and leakage controls
 
-Training consumes a paired NPZ file. See `training/DATASET_FORMAT.md`.
+Training consumes a paired NPZ dataset documented in `training/DATASET_FORMAT.md`.
 
 Each row must contain:
 - One finite 64-dimensional v1-64 feature vector.
 - One finite 18-field physical parameter target in canonical order.
+- A source recording/composition/session group ID.
 - Explicit feature and parameter contract identifiers.
 - The exact range-source commit.
 - A non-empty provenance description.
 
 Targets must already satisfy all hard musical guards. The dataset loader rejects mismatched contracts, invalid shapes, non-finite values, out-of-range targets, fractional waveform enums, and guard violations. It does not create pseudo-labels.
 
+The trainer holds out entire source groups for validation; rows from the same source recording/session cannot appear in both splits. At least ten rows and two distinct source groups are required.
+
 ## Training objective
 
 - Smooth L1 loss on the sixteen continuous parameters after range-aware normalization.
 - Cross-entropy loss for osc1Wave and osc2Wave categorical outputs.
-- Fixed seeded train/validation split.
+- Fixed seeded, source-group-held-out train/validation split.
 - Validation loss, normalized continuous MAE, and per-oscillator waveform accuracy are stored in the checkpoint.
-- The checkpoint records the dataset SHA-256, provenance, contracts, range-source commit, seed, and split sizes.
+- The checkpoint records the dataset SHA-256, provenance, source-group count, contracts, range-source commit, seed, and split sizes.
 
 ## Commands
 
@@ -60,7 +63,7 @@ The adapter refuses missing controller weights in production. Fixed defaults rem
 ## Acceptance gates before production use
 
 1. Dataset provenance and licensing are reviewed.
-2. Train/validation separation prevents leakage by source recording or session.
+2. Train/validation separation is by source recording, composition, or session.
 3. Validation metrics beat documented baselines and are reported per parameter group.
 4. Held-out audio and event sequences are rendered and auditioned.
 5. All predicted frames pass range and musical guard validation.
