@@ -13,10 +13,10 @@ class DatasetError(ValueError):
 
 
 def load_training_dataset(path: str | Path, ranges: ParamRanges):
-    """Load an NPZ dataset with paired v1-64 features and physical 18-field targets.
+    """Load paired v1-64 features, physical targets, and source-group labels.
 
-    Required arrays: features, parameters, feature_contract, parameter_contract,
-    parameter_names, range_source_commit, provenance.
+    Required arrays: features, parameters, groups, feature_contract,
+    parameter_contract, parameter_names, range_source_commit, provenance.
     """
     dataset_path = Path(path)
     if not dataset_path.is_file():
@@ -28,7 +28,7 @@ def load_training_dataset(path: str | Path, ranges: ParamRanges):
 
     with archive:
         required = {
-            "features", "parameters", "feature_contract", "parameter_contract",
+            "features", "parameters", "groups", "feature_contract", "parameter_contract",
             "parameter_names", "range_source_commit", "provenance",
         }
         missing = sorted(required - set(archive.files))
@@ -42,6 +42,7 @@ def load_training_dataset(path: str | Path, ranges: ParamRanges):
             parameter_names = [str(item) for item in np.asarray(archive["parameter_names"]).tolist()]
             features = np.asarray(archive["features"], dtype=np.float32)
             parameters = np.asarray(archive["parameters"], dtype=np.float64)
+            groups = np.asarray(archive["groups"]).astype(str).reshape(-1)
         except (TypeError, ValueError) as exc:
             raise DatasetError(f"invalid dataset metadata or array dtype: {exc}") from exc
 
@@ -62,6 +63,10 @@ def load_training_dataset(path: str | Path, ranges: ParamRanges):
         raise DatasetError(f"parameters must have shape (N, 18), got {parameters.shape}")
     if features.shape[0] != parameters.shape[0] or features.shape[0] < 2:
         raise DatasetError("features and parameters must have equal row counts and at least two rows")
+    if groups.shape != (features.shape[0],) or np.any(np.char.str_len(groups) == 0):
+        raise DatasetError("groups must contain one non-empty source recording/session ID per row")
+    if np.unique(groups).size < 2:
+        raise DatasetError("at least two distinct source groups are required for leakage-safe validation")
     if not np.all(np.isfinite(features)) or not np.all(np.isfinite(parameters)):
         raise DatasetError("features and parameter targets must contain only finite values")
     if np.any(features < -1.0) or np.any(features > 1.0):
@@ -93,4 +98,4 @@ def load_training_dataset(path: str | Path, ranges: ParamRanges):
     if np.any(levels < guards["min_total_level"]):
         raise DatasetError("parameter targets violate the minimum oscillator level guard")
 
-    return features, parameters, provenance
+    return features, parameters, groups, provenance
