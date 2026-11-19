@@ -1,0 +1,104 @@
+import json
+from pathlib import Path
+
+import pytest
+
+from sogitech_adapter.adapter import SogitechAdapter
+from sogitech_adapter.events import GlobalContext, MusicalEvent
+from sogitech_adapter.ranges import ParamRanges, RangeError
+from sogitech_adapter.timing import FramePolicy, FrameSmoother
+from sogitech_adapter.validation import validate_event, validate_frame
+
+
+ROOT = Path(__file__).resolve().parents[1]
+RANGES = ROOT / "ranges.json"
+
+
+def test_ranges_require_exact_verified_schema(tmp_path):
+    raw = json.loads(RANGES.read_text(encoding="utf-8"))
+    raw["unexpected"] = {"min": 0, "max": 1, "scale": "lin", "status": "verified"}
+    path = tmp_path / "ranges.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(RangeError, match="parameter keys mismatch"):
+        ParamRanges(path)
+
+
+def test_ranges_reject_nonfinite_or_inverted_bounds(tmp_path):
+    raw = json.loads(RANGES.read_text(encoding="utf-8"))
+    raw["filterLP"]["max"] = float("nan")
+    path = tmp_path / "ranges.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(RangeError, match="finite numbers"):
+        ParamRanges(path)
+
+
+def test_normalization_round_trip_and_enum():
+    ranges = ParamRanges(RANGES)
+    for name in ("velocity", "filterLP", "glideTime", "powerSagDepth"):
+        for value in (ranges.fields[name]["min"], ranges.fields[name]["max"]):
+            assert ranges.from_norm(name, ranges.to_norm(name, value)) == pytest.approx(value)
+    assert ranges.clamp("osc1Wave", 1.6) == 2.0
+    assert ranges.from_norm("osc1Wave", 0.5) == 2.0
+
+
+def test_ranges_reject_nonfinite_values():
+    ranges = ParamRanges(RANGES)
+    with pytest.raises(ValueError, match="finite"):
+        ranges.clamp("filterLP", float("nan"))
+    with pytest.raises(ValueError, match="finite"):
+        ranges.from_norm("filterLP", float("inf"))
+
+
+def test_production_adapter_requires_controller():
+    with pytest.raises(ValueError, match="trained controller is required"):
+        SogitechAdapter(ParamRanges(RANGES))
+
+
+def test_demo_adapter_emits_exact_18_field_frame():
+    adapter = SogitechAdapter(ParamRanges(RANGES), allow_safe_defaults=True)
+    event = MusicalEvent(startTime=0.0)
+    frame = adapter.on_event(event, GlobalContext())
+    assert len(frame) == 18
+    assert not validate_frame(frame, adapter.ranges)
+
+
+def test_event_validation_rejects_nan_and_noninteger_pitch():
+    assert validate_event(MusicalEvent(velocity=float("nan")))
+    assert validate_event(MusicalEvent(pressure=float("inf")))
+    assert validate_event(MusicalEvent(midiNote=60.5))
+
+
+def test_evolving_smoother_preserves_event_fields_and_rate_limits_controls():
+    smoother = FrameSmoother(FramePolicy(mode="evolving", smooth_tau_ms=30.0))
+    first = {
+        "midiNote": 60.0, "velocity": 0.1, "pressure": 0.0,
+        "osc1Wave": 0.0, "osc2Wave": 1.0, "filterLP": 0.2,
+    }
+    second = {
+        "midiNote": 72.0, "velocity": 0.9, "pressure": 0.8,
+        "osc1Wave": 3.0, "osc2Wave": 2.0, "filterLP": 0.9,
+    }
+    assert smoother.process(first, dt_ms=10.0) == first
+    result = smoother.process(second, dt_ms=10.0)
+    assert result["midiNote"] == 72.0
+    assert result["velocity"] == 0.9
+    assert result["pressure"] == 0.8
+    assert result["osc1Wave"] == 3.0
+    assert result["filterLP"] < 0.9
+    assert result["filterLP"] <= 0.2 + 0.08
+
+
+def test_adapter_rejects_out_of_order_events():
+    adapter = SogitechAdapter(ParamRanges(RANGES), allow_safe_defaults=True)
+    adapter.on_event(MusicalEvent(startTime=1.0), GlobalContext())
+    with pytest.raises(ValueError, match="non-decreasing"):
+        adapter.on_event(MusicalEvent(startTime=0.5), GlobalContext())
+
+
+def test_adapter_reset_clears_stream_state():
+    adapter = SogitechAdapter(ParamRanges(RANGES), allow_safe_defaults=True)
+    adapter.on_event(MusicalEvent(midiNote=64, startTime=0.0), GlobalContext())
+    adapter.reset()
+    assert adapter.last_note is None
+    assert adapter.brightness_hist == [0.5] * 8
+    assert adapter._last_event_time is None
