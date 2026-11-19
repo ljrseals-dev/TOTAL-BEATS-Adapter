@@ -35,8 +35,7 @@ FEATURE_NAMES: List[str] = [
 
 assert len(FEATURE_NAMES) == DIM
 
-# Identity values are safe placeholders, not learned dataset statistics.
-# Replace only when a versioned training corpus and its fit procedure exist.
+# Identity values are safe placeholders only; these are not fitted corpus statistics.
 NORM_STATS = {name: (0.0, 1.0) for name in FEATURE_NAMES}
 
 INSTRUMENT_SLOTS = {
@@ -129,6 +128,8 @@ def build_features(ev: Any, ctx: Any) -> np.ndarray:
     ref_audio = getattr(ctx, "ref_audio", None)
     if ref_audio is not None and len(ref_audio) > 0:
         audio = np.asarray(ref_audio, dtype=np.float32).reshape(-1)
+        if not np.all(np.isfinite(audio)):
+            raise ValueError("reference audio must contain only finite samples")
         rms = float(np.sqrt(np.mean(audio ** 2) + 1e-8))
         peak = float(np.max(np.abs(audio)) + 1e-8)
         zcr = float(np.mean(np.abs(np.diff(np.sign(audio))))) if audio.size > 1 else 0.0
