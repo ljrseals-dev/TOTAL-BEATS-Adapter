@@ -36,6 +36,20 @@ def _prepare_targets(parameters: np.ndarray, ranges: ParamRanges):
     return continuous, osc1, osc2
 
 
+def _group_split(groups: np.ndarray, validation_fraction: float, seed: int):
+    """Split whole source recordings/sessions so rows from one source cannot leak."""
+    unique_groups = np.unique(np.asarray(groups).astype(str))
+    if unique_groups.size < 2:
+        raise ValueError("at least two source groups are required for a leakage-safe split")
+    rng = np.random.default_rng(seed)
+    shuffled_groups = rng.permutation(unique_groups)
+    validation_count = max(1, int(round(unique_groups.size * validation_fraction)))
+    validation_count = min(validation_count, unique_groups.size - 1)
+    validation_groups = shuffled_groups[:validation_count]
+    is_validation = np.isin(groups, validation_groups)
+    return np.flatnonzero(~is_validation), np.flatnonzero(is_validation)
+
+
 def _evaluate(torch, model, features, continuous, osc1, osc2):
     model.eval()
     with torch.no_grad():
@@ -69,26 +83,25 @@ def train(args) -> Path:
         raise RuntimeError("PyTorch is required; install the train extra") from exc
 
     ranges = ParamRanges(args.ranges)
-    features_np, parameters_np, provenance = load_training_dataset(args.data, ranges)
+    features_np, parameters_np, groups, provenance = load_training_dataset(args.data, ranges)
     if features_np.shape[0] < 10:
         raise ValueError("at least 10 paired samples are required for a train/validation split")
 
     continuous_np, osc1_np, osc2_np = _prepare_targets(parameters_np, ranges)
-    torch.manual_seed(args.seed)
-    rng = np.random.default_rng(args.seed)
-    order = rng.permutation(features_np.shape[0])
-    validation_count = max(1, int(round(features_np.shape[0] * args.validation_fraction)))
-    validation_indices = order[:validation_count]
-    training_indices = order[validation_count:]
-    if training_indices.size < 2:
-        raise ValueError("dataset is too small after validation split")
+    training_indices, validation_indices = _group_split(
+        groups, args.validation_fraction, args.seed
+    )
+    if training_indices.size < 2 or validation_indices.size < 1:
+        raise ValueError("source-group split produced an unusable train/validation partition")
 
+    torch.manual_seed(args.seed)
     x = torch.as_tensor(features_np, dtype=torch.float32)
     y_cont = torch.as_tensor(continuous_np, dtype=torch.float32)
     y_osc1 = torch.as_tensor(osc1_np, dtype=torch.long)
     y_osc2 = torch.as_tensor(osc2_np, dtype=torch.long)
     model = build_network(torch)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
+    rng = np.random.default_rng(args.seed)
 
     for _epoch in range(args.epochs):
         model.train()
@@ -124,6 +137,7 @@ def train(args) -> Path:
         "state_dict": model.state_dict(),
         "dataset_sha256": dataset_hash,
         "dataset_provenance": provenance,
+        "source_group_count": int(np.unique(groups).size),
         "sample_count": int(features_np.shape[0]),
         "training_sample_count": int(training_indices.size),
         "validation_sample_count": int(validation_indices.size),
