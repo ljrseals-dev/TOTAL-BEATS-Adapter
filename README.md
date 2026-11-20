@@ -8,29 +8,33 @@ Converts compositional intelligence (musical events + context) into expressive, 
 
 ## Current status (2026-11-19)
 
-| Phase | Component                        | State              |
-|-------|----------------------------------|--------------------|
-| 0     | Contract integrity                 | **Complete**       |
-| 1     | Production-grade adapter         | **Substantial**    |
-| 2     | Neural controller + training     | Not started        |
-| 3     | Guard + timing system            | Partial (core done)|
-| 4     | Polyphonic Sogitech integration  | Design only        |
-| 5     | Offline audio rendering          | Not started        |
-| 6     | Learned audio embedding          | Stub only          |
-| 7     | Mixing and mastering             | Not started        |
-| 8     | Complete album production        | Spec only          |
+| Phase | Component | State |
+|---|---|---|
+| 0 | Contract integrity | **Complete** |
+| 1 | Production-grade adapter | **Repair in progress** |
+| 2 | v1-64 controller + trainer | **Implemented; dataset and weights absent** |
+| 3 | Guard + timing system | **Core repairs implemented; further integration pending** |
+| 4 | Polyphonic Sogitech integration | Design only |
+| 5 | Offline audio rendering | Not started |
+| 6 | Learned audio embedding | Stub only |
+| 7 | Mixing and mastering | Not started |
+| 8 | Complete album production | Spec only |
 
-**Contract defect fixed:** `brightness_hist_7` is correctly at index 43; `audio_emb_0` at index 44.
+**Feature contract:** `brightness_hist_7` is index 43; `audio_emb_0` is index 44. The audio block currently contains only simple reference-audio statistics and zeros, not a learned embedding. Normalization statistics remain identity placeholders until a versioned corpus is fitted.
+
+**Parameter source pin:** `ranges.json` is checked against Sogitech commit `1a40ed625743d16e41341a0a3c08d0a2b6f45ff5`, not a moving branch name.
 
 ---
 
-## Quick start
+## Installation and quick start
+
+Base adapter and test dependencies:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install numpy pytest
-pip install -e .
+python -m pip install --upgrade pip
+pip install -e ".[dev]"
 
 # Verify contracts
 python -c "from sogitech_adapter import ParamRanges; r = ParamRanges('ranges.json'); print(r.contract, len(r.fields))"
@@ -38,9 +42,18 @@ python -c "from sogitech_adapter import ParamRanges; r = ParamRanges('ranges.jso
 # Run tests
 pytest tests/ -v
 
-# Smoke the adapter
+# Smoke the adapter with explicitly enabled demo defaults (not neural inference)
 python scripts/smoke_adapter.py
 ```
+
+PyTorch is deliberately optional and is never silently substituted:
+
+- Controller inference: `pip install -e ".[neural]"`
+- Controller training: `pip install -e ".[train]"`
+
+Production use must pass a compatible trained controller to `SogitechAdapter`. The loader rejects legacy checkpoints trained on a different 64-value feature layout. Training requires a reviewed paired v1-64 dataset documented in `training/DATASET_FORMAT.md`. No dataset or trained weights are currently included.
+
+Missing PyTorch raises an actionable error at the point where inference or training is requested. See [the import policy](docs/IMPORT_POLICY.md) for the required/optional dependency rules and tests.
 
 ---
 
@@ -48,44 +61,36 @@ python scripts/smoke_adapter.py
 
 ```
 TOTAL-BEATS-Adapter/
-├── ranges.json                     # verified 18-field ranges
+├── ranges.json
 ├── sogitech_adapter/
-│   ├── adapter.py                  # MusicalEvent → 18-field frame
-│   ├── features.py                 # 64-dim Feature Constructor (v1-64)
-│   ├── ranges.py                   # loader that refuses unverified ranges
-│   ├── events.py                   # MusicalEvent + GlobalContext
-│   ├── guards.py                   # musical safety guards
-│   ├── timing.py                   # FramePolicy + smoother
-│   └── validation.py               # event and frame validators
+│   ├── adapter.py
+│   ├── controller.py
+│   ├── features.py
+│   ├── ranges.py
+│   ├── events.py
+│   ├── guards.py
+│   ├── timing.py
+│   └── validation.py
+├── training/
+│   ├── dataset.py
+│   ├── train_controller.py
+│   └── DATASET_FORMAT.md
 ├── docs/
-│   ├── ARCHITECTURE.md
-│   ├── FEATURE_CONTRACT_v1-64.md
-│   ├── PARAMETER_CONTRACT_v1.md
-│   ├── INTEGRATION_SPEC.md
-│   ├── POLYPHONY_DESIGN.md
-│   ├── TRAINING_SPEC.md
-│   ├── RENDERING_SPEC.md
-│   └── ALBUM_PRODUCTION.md
 ├── tests/
-│   └── test_contract_v1_64.py
-├── scripts/
-│   └── smoke_adapter.py
-├── training/                       # (scaffolding)
-├── audio/                          # (scaffolding)
-├── embeddings/                     # (scaffolding)
-├── album/                          # (scaffolding)
+├── scripts/smoke_adapter.py
 └── .github/workflows/tests.yml
 ```
 
----
-
 ## Core design rules
 
-1. **Composition never emits synthesis parameters.** TOTAL BEATS emits `MusicalEvent`s + context.
+1. **Composition never emits synthesis parameters.** TOTAL BEATS emits `MusicalEvent` objects and context.
 2. **Synthesis never decides musical structure.** Sogitech only consumes 18-field frames.
-3. **Contracts are frozen.** 64-dim features and 18-field parameters are versioned.
-4. **Fail loudly.** Unverified ranges or missing controller weights raise hard errors.
-5. **Do not invent trained weights.** The controller refuses random initialisation.
+3. **Contracts are versioned.** The 64-dim feature vector and 18-field parameter frame are frozen interfaces.
+4. **Fail loudly.** Unverified ranges, malformed frames, and missing production controller weights raise hard errors.
+5. **Demo mode is explicit.** Fixed safe defaults are available only when `allow_safe_defaults=True`; they are not neural predictions.
+6. **No incompatible checkpoints.** Controller weights must declare the exact feature, parameter, controller, and range-source contracts.
+7. **No fabricated training data.** The trainer accepts only paired feature/parameter datasets with provenance and guard validation, and holds out complete source groups.
+8. **No fake imports.** Required imports fail; optional capabilities fail explicitly when requested but unavailable. See [docs/IMPORT_POLICY.md](docs/IMPORT_POLICY.md).
 
 ---
 
@@ -93,8 +98,6 @@ TOTAL-BEATS-Adapter/
 
 - **Sogitech** — https://github.com/ljrseals-dev/Sogitech (MIT)
 - **TOTAL BEATS** — generative music engine by Lewis James Seals Jr.
-
----
 
 ## License
 

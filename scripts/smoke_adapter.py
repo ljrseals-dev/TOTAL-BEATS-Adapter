@@ -1,27 +1,34 @@
 #!/usr/bin/env python3
-"""Quick smoke test of the adapter without a trained controller."""
+"""Quick adapter smoke test using explicitly enabled, non-neural demo defaults."""
 from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from sogitech_adapter.ranges import ParamRanges
-from sogitech_adapter.features import EventStub, ContextStub
+from sogitech_adapter.events import MusicalEvent, GlobalContext
 from sogitech_adapter.adapter import SogitechAdapter
 
-def main():
-    ranges = ParamRanges(Path(__file__).resolve().parents[1] / "ranges.json")
-    adapter = SogitechAdapter(ranges=ranges, controller=None)
 
-    ev = EventStub(
+def main():
+    root = Path(__file__).resolve().parents[1]
+    ranges = ParamRanges(root / "ranges.json")
+    adapter = SogitechAdapter(
+        ranges=ranges,
+        controller=None,
+        allow_safe_defaults=True,
+    )
+
+    event = MusicalEvent(
         midiNote=60,
         velocity=0.75,
         duration=2.0,
         brightness=0.65,
         instrument="pad",
         pan=-0.2,
+        startTime=0.0,
     )
-    ctx = ContextStub(
+    context = GlobalContext(
         key_root=0,
         mode="minor",
         tempo=88.0,
@@ -32,16 +39,18 @@ def main():
         rhythmic_density=0.25,
     )
 
-    frame = adapter.on_event(ev, ctx)
+    frame = adapter.on_event(event, context)
+    assert len(frame) == 18
     print("Contract:", ranges.contract)
-    print("Frame keys:", sorted(frame.keys()))
+    print("Frame fields:", len(frame))
     print("midiNote     :", frame["midiNote"])
     print("velocity     :", frame["velocity"])
     print("additiveBlend:", round(frame["additiveBlend"], 3))
     print("powerSagDepth:", round(frame["powerSagDepth"], 3))
     print("filterLP     :", round(frame["filterLP"], 3))
     print("glideTime    :", round(frame["glideTime"], 3))
-    print("OK — adapter produced a legal 18-field frame.")
+    print("OK — demo defaults produced a legal 18-field frame (not neural inference).")
+
 
 if __name__ == "__main__":
     main()

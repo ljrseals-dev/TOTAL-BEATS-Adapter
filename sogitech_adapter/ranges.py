@@ -1,12 +1,9 @@
-"""Parameter range loader and utilities for Sogitech ↔ TOTAL BEATS adapter.
-
-Fails loudly if ranges.json still contains TODOs or is unverified.
-Same discipline as Sogitech refusing random controller weights.
-"""
+"""Parameter range loader and utilities for Sogitech ↔ TOTAL BEATS adapter."""
 from __future__ import annotations
 
 import json
 import math
+import re
 from pathlib import Path
 from typing import Any, Dict
 
@@ -16,11 +13,11 @@ REQUIRED_18 = [
     "powerSagDepth", "filterLP", "filterHP", "filterRes", "keyTrack",
     "velMod", "glideTime", "residualGain",
 ]
+SUPPORTED_SCALES = {"lin", "log", "log1p", "enum"}
 
 
 class RangeError(RuntimeError):
     """Raised when ranges.json is incomplete, unverified, or malformed."""
-    pass
 
 
 class ParamRanges:
@@ -28,66 +25,151 @@ class ParamRanges:
         path = Path(path)
         if not path.is_file():
             raise RangeError(f"ranges.json not found: {path}")
+        try:
+            with path.open("r", encoding="utf-8") as stream:
+                raw = json.load(stream)
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RangeError(f"cannot read ranges file {path}: {exc}") from exc
+        if not isinstance(raw, dict):
+            raise RangeError("ranges.json root must be an object")
 
-        with open(path, "r", encoding="utf-8") as f:
-            raw = json.load(f)
-
+        raw = dict(raw)
         meta = raw.pop("_meta", {})
         self.guards = raw.pop("_guards", {})
-        self.contract = meta.get("contract", "unknown")
-        self.fields: Dict[str, Dict[str, Any]] = {}
-        for name, spec in raw.items():
-            self.fields[name] = spec
-
+        self.contract = meta.get("contract", "unknown") if isinstance(meta, dict) else "unknown"
+        self.source_commit = meta.get("source_commit") if isinstance(meta, dict) else None
+        self.fields: Dict[str, Dict[str, Any]] = raw
         self._validate(meta)
 
+    @staticmethod
+    def _finite_number(value: Any) -> bool:
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            return False
+        try:
+            return math.isfinite(float(value))
+        except (OverflowError, TypeError, ValueError):
+            return False
+
     def _validate(self, meta: dict) -> None:
-        if not meta.get("verified", False):
-            todos = [k for k, v in self.fields.items() if v.get("status") == "TODO"]
-            raise RangeError(
-                f"ranges.json not verified ({len(todos)} TODO fields: {todos[:5]}...). "
-                f"Fill from repo constants and set _meta.verified=true before running."
-            )
-        missing = [f for f in REQUIRED_18 if f not in self.fields]
-        if missing:
-            raise RangeError(f"missing fields: {missing}")
-        if len(self.fields) != 18:
-            raise RangeError(f"expected 18 fields, got {len(self.fields)}")
+        if not isinstance(meta, dict):
+            raise RangeError("_meta must be an object")
+        if self.contract != "sogitech.params.v1":
+            raise RangeError(f"unsupported parameter contract: {self.contract!r}")
+        if meta.get("verified") is not True:
+            raise RangeError("ranges.json is not marked verified")
+        if not isinstance(self.source_commit, str) or not re.fullmatch(r"[0-9a-f]{40}", self.source_commit):
+            raise RangeError("_meta.source_commit must be a pinned 40-character Git commit SHA")
 
-    def clamp(self, name: str, v: float) -> float:
-        s = self.fields[name]
-        if s["scale"] == "enum":
-            return int(round(max(s["min"], min(s["max"], v))))
-        return max(s["min"], min(s["max"], v))
+        missing = [name for name in REQUIRED_18 if name not in self.fields]
+        extra = [name for name in self.fields if name not in REQUIRED_18]
+        if missing or extra or len(self.fields) != len(REQUIRED_18):
+            raise RangeError(f"parameter keys mismatch; missing={missing}, extra={extra}")
 
-    def to_norm(self, name: str, v: float) -> float:
-        """physical → [0,1], for loss computation."""
-        s = self.fields[name]
-        if s["scale"] == "log":
-            lo, hi = math.log(s["min"]), math.log(s["max"])
-            return (math.log(max(v, s["min"])) - lo) / (hi - lo)
-        if s["scale"] == "log1p":
-            lo, hi = math.log1p(s["min"]), math.log1p(s["max"])
-            return (math.log1p(max(v, s["min"])) - lo) / (hi - lo)
-        return (v - s["min"]) / (s["max"] - s["min"])
+        for name in REQUIRED_18:
+            spec = self.fields[name]
+            if not isinstance(spec, dict):
+                raise RangeError(f"{name}: specification must be an object")
+            lo, hi, scale = spec.get("min"), spec.get("max"), spec.get("scale")
+            if not self._finite_number(lo) or not self._finite_number(hi) or lo >= hi:
+                raise RangeError(f"{name}: min/max must be finite numbers with min < max")
+            if scale not in SUPPORTED_SCALES:
+                raise RangeError(f"{name}: unsupported scale {scale!r}")
+            if spec.get("status") != "verified":
+                raise RangeError(f"{name}: field is not marked verified")
+            if scale == "log" and lo <= 0:
+                raise RangeError(f"{name}: logarithmic scale requires min > 0")
+            if scale == "log1p" and lo <= -1:
+                raise RangeError(f"{name}: log1p scale requires min > -1")
+            if scale == "enum":
+                states = spec.get("enum_states")
+                if (not isinstance(states, list) or not states
+                        or not all(isinstance(item, str) and item for item in states)
+                        or not float(lo).is_integer() or not float(hi).is_integer()
+                        or int(hi - lo + 1) != len(states)):
+                    raise RangeError(f"{name}: enum_states must match its integer range")
 
-    def from_norm(self, name: str, u: float) -> float:
-        """[0,1] → physical, for the controller output layer."""
-        s = self.fields[name]
-        u = max(0.0, min(1.0, u))
-        if s["scale"] == "log":
-            return math.exp(math.log(s["min"]) + u * (math.log(s["max"]) - math.log(s["min"])))
-        if s["scale"] == "log1p":
-            return math.expm1(math.log1p(s["min"]) + u * (math.log1p(s["max"]) - math.log1p(s["min"])))
-        return s["min"] + u * (s["max"] - s["min"])
+        if not isinstance(self.guards, dict):
+            raise RangeError("_guards must be an object")
+        numeric_guards = {
+            "hp_lt_lp_ratio": self.guards.get("hp_lt_lp_ratio"),
+            "max_delta_per_10ms": self.guards.get("max_delta_per_10ms"),
+            "min_total_level": self.guards.get("min_total_level"),
+            "fallback_osc1_level": self.guards.get("fallback_osc1_level"),
+            "power_sag_musical_ceiling": self.guards.get("power_sag_musical_ceiling"),
+            "residual_musical_ceiling": self.guards.get("residual_musical_ceiling"),
+        }
+        for key, value in numeric_guards.items():
+            if not self._finite_number(value):
+                raise RangeError(f"_guards.{key} must be a finite number")
+        if not 0.0 < numeric_guards["hp_lt_lp_ratio"] <= 1.0:
+            raise RangeError("_guards.hp_lt_lp_ratio must be in (0, 1]")
+        if numeric_guards["max_delta_per_10ms"] <= 0:
+            raise RangeError("_guards.max_delta_per_10ms must be positive")
+        if not 0.0 <= numeric_guards["min_total_level"] <= 4.0:
+            raise RangeError("_guards.min_total_level must be in [0, 4]")
+        fallback = numeric_guards["fallback_osc1_level"]
+        if not self.fields["osc1Level"]["min"] <= fallback <= self.fields["osc1Level"]["max"]:
+            raise RangeError("_guards.fallback_osc1_level is outside osc1Level range")
+        for key, field_name in (("power_sag_musical_ceiling", "powerSagDepth"),
+                                ("residual_musical_ceiling", "residualGain")):
+            ceiling = numeric_guards[key]
+            if not self.fields[field_name]["min"] <= ceiling <= self.fields[field_name]["max"]:
+                raise RangeError(f"_guards.{key} is outside {field_name} range")
+        coupled = self.guards.get("res_soft_couple_additive")
+        if not isinstance(coupled, dict):
+            raise RangeError("_guards.res_soft_couple_additive must be an object")
+        trigger, ceiling = coupled.get("trigger_above"), coupled.get("res_ceiling")
+        if not self._finite_number(trigger) or not 0 <= trigger <= 1:
+            raise RangeError("_guards.res_soft_couple_additive.trigger_above must be in [0, 1]")
+        if (not self._finite_number(ceiling)
+                or not self.fields["filterRes"]["min"] <= ceiling <= self.fields["filterRes"]["max"]):
+            raise RangeError("_guards.res_soft_couple_additive.res_ceiling is invalid")
+
+    def _value(self, name: str, value: float) -> float:
+        if name not in self.fields:
+            raise KeyError(name)
+        if not self._finite_number(value):
+            raise ValueError(f"{name} must be finite")
+        return float(value)
+
+    def clamp(self, name: str, value: float) -> float:
+        value = self._value(name, value)
+        spec = self.fields[name]
+        bounded = max(float(spec["min"]), min(float(spec["max"]), value))
+        if spec["scale"] == "enum":
+            bounded = float(math.floor(bounded + 0.5))
+        return bounded
+
+    def to_norm(self, name: str, value: float) -> float:
+        """Map a physical value to [0, 1], safely handling range endpoints."""
+        value = self.clamp(name, value)
+        spec = self.fields[name]
+        lo, hi = float(spec["min"]), float(spec["max"])
+        if spec["scale"] == "log":
+            return (math.log(value) - math.log(lo)) / (math.log(hi) - math.log(lo))
+        if spec["scale"] == "log1p":
+            return (math.log1p(value) - math.log1p(lo)) / (math.log1p(hi) - math.log1p(lo))
+        return (value - lo) / (hi - lo)
+
+    def from_norm(self, name: str, value: float) -> float:
+        """Map a finite normalised value to its physical parameter range."""
+        value = self._value(name, value)
+        u = max(0.0, min(1.0, value))
+        spec = self.fields[name]
+        lo, hi = float(spec["min"]), float(spec["max"])
+        if spec["scale"] == "log":
+            physical = math.exp(math.log(lo) + u * (math.log(hi) - math.log(lo)))
+        elif spec["scale"] == "log1p":
+            physical = math.expm1(math.log1p(lo) + u * (math.log1p(hi) - math.log1p(lo)))
+        else:
+            physical = lo + u * (hi - lo)
+        return self.clamp(name, physical)
 
     def apply_musical_ceilings(self, frame: dict) -> dict:
-        """Apply guard-layer musical ceilings (powerSag, residual)."""
+        """Apply documented musical ceilings without mutating the input."""
         out = dict(frame)
         if "powerSagDepth" in out:
-            ceiling = self.guards.get("power_sag_musical_ceiling", 0.6)
-            out["powerSagDepth"] = min(out["powerSagDepth"], ceiling)
+            out["powerSagDepth"] = min(out["powerSagDepth"], self.guards["power_sag_musical_ceiling"])
         if "residualGain" in out:
-            ceiling = self.guards.get("residual_musical_ceiling", 0.3)
-            out["residualGain"] = min(out["residualGain"], ceiling)
+            out["residualGain"] = min(out["residualGain"], self.guards["residual_musical_ceiling"])
         return out

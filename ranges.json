@@ -2,9 +2,9 @@
   "_meta": {
     "contract": "sogitech.params.v1",
     "source_repo": "ljrseals-dev/Sogitech",
-    "source_commit": "main (verified 2026-11-19)",
+    "source_commit": "1a40ed625743d16e41341a0a3c08d0a2b6f45ff5",
     "verified": true,
-    "notes": "Ranges taken from python/audio/render.py PARAM_DEFAULTS and python/neural/controller.py PARAM_RANGES / PARAM_NAMES. Wave enums are continuous 0–3 in the reference renderer (sine/saw/square/triangle)."
+    "notes": "Ranges independently checked against python/audio/render.py PARAM_DEFAULTS and python/neural/controller.py PARAM_RANGES / PARAM_NAMES at the pinned source commit. Wave enums are continuous 0–3 in the reference renderer (sine/saw/square/triangle)."
   },
 
   "midiNote":      { "min": 0.0,  "max": 127.0, "scale": "lin", "unit": "note",  "owner": "passthrough", "status": "verified" },
