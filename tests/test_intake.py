@@ -1,11 +1,30 @@
-import json
-
+import numpy as np
 import pytest
 
-from sogitech_adapter.ranges import ParamRanges
-from training.intake import inspect_dataset
+from sogitech_adapter.ranges import ParamRanges, REQUIRED_18
 from training.dataset import DatasetError
-from tests.test_controller_training import _write_dataset
+from training.intake import inspect_dataset
+
+
+def _write_dataset(path, ranges, feature_contract="v1-64"):
+    rows = 10
+    features = np.zeros((rows, 64), dtype=np.float32)
+    target = np.asarray([
+        60.0, 0.7, 0.0, 1.0, 2.0, 0.7, 0.2, 0.1, 0.01,
+        0.2, 0.2, 0.7, 0.1, 0.2, 0.5, 0.5, 0.03, 0.0,
+    ], dtype=np.float64)
+    parameters = np.tile(target, (rows, 1))
+    np.savez(
+        path,
+        features=features,
+        parameters=parameters,
+        groups=np.asarray(["recording-a"] * 5 + ["recording-b"] * 5),
+        feature_contract=np.asarray(feature_contract),
+        parameter_contract=np.asarray("sogitech.params.v1"),
+        parameter_names=np.asarray(REQUIRED_18),
+        range_source_commit=np.asarray(ranges.source_commit),
+        provenance=np.asarray("test fixture only; no rights assertion"),
+    )
 
 
 def test_intake_reports_hash_and_keeps_rights_review_pending(tmp_path):
