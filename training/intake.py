@@ -1,4 +1,4 @@
-"""Dataset intake preflight; validates structure without authorizing training."""
+"Dataset intake preflight; validates structure without authorizing training."""
 from __future__ import annotations
 
 import argparse
@@ -37,6 +37,7 @@ def inspect_dataset(dataset_path: str | Path, ranges_path: str | Path = "ranges.
         "range_source_commit": ranges.source_commit,
         "provenance_description": provenance,
         "structural_validation": "passed",
+        "rights_review": "pending_human_review",
         "rights_and_provenance_review": {
             "status": "pending_human_review",
             "reviewed_by": None,
